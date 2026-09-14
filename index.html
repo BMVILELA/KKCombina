@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
-  <title>Quiosque Combina v15</title>
+  <title>Quiosque Combina v16</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
@@ -53,9 +53,11 @@ const ls=k=>{try{return JSON.parse(localStorage.getItem(k)||"null")}catch{return
 const lsa=k=>{try{return JSON.parse(localStorage.getItem(k)||"[]")}catch{return[]}};
 const lss=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
 const todayStr=()=>new Date().toDateString();
-const todayISO=()=>new Date().toISOString().slice(0,10);
-const fmtDate=iso=>new Date(iso).toLocaleDateString("pt-PT");
-const fmtTime=iso=>new Date(iso).toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"});
+// Data LOCAL do browser — resolve fuso UTC vs Portugal
+const todayISO=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
+const localISO=()=>{const d=new Date(),p=n=>String(n).padStart(2,"0");return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.000`;};
+const fmtDate=iso=>new Date(iso.length<=10?iso+"T12:00:00":iso).toLocaleDateString("pt-PT");
+const fmtTime=iso=>{const d=new Date(iso.length<=10?iso+"T12:00:00":iso);return`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;};
 const isoDay=iso=>iso.slice(0,10);
 
 const vendasPorCombina=ic=>{
@@ -348,7 +350,7 @@ function App(){
   };
   const doLogin=()=>{
     const h=getHorario();
-    const s={colaborador:lNome,quiosque:lQ,horaEntrada:h.entrada,horaSaida:h.saida,loginTs:new Date().toISOString()};
+    const s={colaborador:lNome,quiosque:lQ,horaEntrada:h.entrada,horaSaida:h.saida,loginTs:localISO()};
     setSession(s);lss(SK,s);
   };
   const doLogout=()=>{
@@ -373,7 +375,7 @@ function App(){
 
   const saveRecord=async()=>{
     const r={
-      id:Date.now(),ts:new Date().toISOString(),
+      id:Date.now(),ts:localISO(),
       colaborador:session.colaborador,quiosque:session.quiosque,
       horaEntrada:session.horaEntrada,horaSaida:session.horaSaida,
       aceitou,isCombina:aceitou?isCombina:null,
