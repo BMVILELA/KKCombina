@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Quiosque Combina · Lojas NOS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+    html, body { height: 100%; overflow-x: hidden; }
+    body { background: #f9fafb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin 1s linear infinite; }
+    input, textarea, select { font-size: 16px !important; } /* evita zoom no iOS */
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    const SUPABASE_URL = "https://czujxgdqomczazlafcag.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN6dWp4Z2Rxb21jemF6bGFmY2FnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzODkwOTMsImV4cCI6MjEwNDk2NTA5M30.dux2EkfsMAg5z-v7yUeCNgg7eVHUF_ZROatJytzRgJc";
+
+    const { createClient } = supabase;
+    const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const SESSION_KEY = "combina_session_v7";
+    const CACHE_KEY   = "combina_cache_v7";
+    const QUEUE_KEY   = "combina_queue_v7";
+
+    const loadSession  = () => { try { return JSON.parse(localStorage.getItem(SESSION_KEY)||"null"); } catch { return null; } };
+    const saveSession  = s  => localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    const clearSession = () => localStorage.removeItem(SESSION_KEY);
+    const loadCache    = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY)||"[]"); } catch { return []; } };
+    const saveCache    = d  => localStorage.setItem(CACHE_KEY, JSON.stringify(d));
+    const loadQueue    = () => { try { return JSON.parse(localStorage.getItem(QUEUE_KEY)||"[]"); } catch { return []; } };
+    const saveQueue    = d  => localStorage.setItem(QUEUE_KEY, JSON.stringify(d));
+
+    const todayStr = () => new Date().toDateString();
+    const fmtDate  = iso => new Date(iso).toLocaleDateString("pt-PT");
+    const fmtTime  = iso => new Date(iso).toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"});
+    const fmt      = (iso,type) => type==="time"?fmtTime(iso):fmtDate(iso);
+
+    const toRow = r => ({
+      id: r.id, ts: r.ts,
+      colaborador: r.colaborador||"",
+      hora_entrada: r.horaEntrada||"",
+      hora_saida: r.horaSaida||"",
+      recusou: !!r.recusou,
+      is_combina: r.isCombina==null ? null : r.isCombina===false ? 0 : Number(r.isCombina),
+      vendeu_combina: r.vendeuCombina??null,
+      is_nos: r.isNos??null,
+      venda_energia: !!(r.vendas?.energia),
+      venda_novo_cliente: !!(r.vendas?.novoCliente),
+      venda_alarme: !!(r.vendas?.alarme),
+      tem_lead: !!r.lead,
+      lead_nome: r.lead?.nome||null,
+      lead_tel: r.lead?.tel||null,
+      lead_obs: r.lead?.obs||null,
+    });
+
+    const fromRow = row => ({
+      id: row.id, ts: row.ts,
+      colaborador: row.colaborador,
+      horaEntrada: row.hora_entrada,
+      horaSaida: row.hora_saida,
+      recusou: row.recusou,
+      isCombina: row.is_combina==null ? null : row.is_combina===0 ? false : row.is_combina,
+      vendeuCombina: row.vendeu_combina,
+      isNos: row.is_nos,
+      vendas: { energia: row.venda_energia, novoCliente: row.venda_novo_cliente, alarme: row.venda_alarme },
+      lead: row.tem_lead ? { nome: row.lead_nome, tel: row.lead_tel, obs: row.lead_obs } : null,
+    });
+
+    const stats = arr => ({
+      total: arr.length,
+      recusas: arr.filter(r=>r.recusou).length,
+      conversas: arr.filter(r=>!r.recusou).length,
+      energia: arr.filter(r=>r.vendas?.energia).length,
+      novoCliente: arr.filter(r=>r.vendas?.novoCliente).length,
+      alarme: arr.filter(r=>r.vendas?.alarme).length,
+      leads: arr.filter(r=>r.lead).length,
+      c0: arr.filter(r=>r.isCombina===false).length,
+      c1: arr.filter(r=>r.isCombina===1).length,
+      c2: arr.filter(r=>r.isCombina===2).length,
+      c3: arr.filter(r=>r.isCombina===3).length,
+    });
+
+    const exportCSV = (data, filename) => {
+      if (!data.length) { alert("Sem dados."); return; }
+      const h = ["Data","Hora","Colaborador","Entrada","Saida","Recusou","Combina","VendeuCombina","ClienteNOS","VendaEnergia","VendaNovoCliente","VendaAlarme","Lead","LeadNome","LeadTel","LeadObs"];
+      const rows = data.map(r=>[
+        fmtDate(r.ts),fmtTime(r.ts),r.colaborador||"",r.horaEntrada||"",r.horaSaida||"",
+        r.recusou?"Sim":"Não",
+        r.isCombina===false?"Sem Combina":r.isCombina?`Combina ${r.isCombina}`:"",
+        r.vendeuCombina===true?"Sim":r.vendeuCombina===false?"Não":"",
+        r.isNos===true?"Sim":r.isNos===false?"Não":"",
+        r.vendas?.energia?"Sim":"Não",r.vendas?.novoCliente?"Sim":"Não",r.vendas?.alarme?"Sim":"Não",
+        r.lead?"Sim":"Não",r.lead?.nome||"",r.lead?.tel||"",(r.lead?.obs||"").replace(/"/g,"'"),
+      ].map(v=>`"${String(v).replace(/"/g,"''")}"`).join(","));
+      const blob = new Blob(["\ufeff"+[h.join(","),...rows].join("\n")],{type:"text/csv;charset=utf-8;"});
+      const a = Object.assign(document.createElement("a"),{href:URL.createObjectURL(blob),download:filename});
+      a.click(); URL.revokeObjectURL(a.href);
+    };
+
+    const Bar = ({value,max,color}) => (
+      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{width:max?`${Math.round(value/max*100)}%`:"0%",transition:"width .5s"}} />
+      </div>
+    );
+
+    const KPI = ({label,value,sub,bg,tc}) => (
+      <div className={`rounded-2xl p-4 ${bg}`}>
+        <p className={`text-3xl font-black ${tc}`}>{value}</p>
+        {sub&&<p className={`text-xs font-bold opacity-60 ${tc}`}>{sub}</p>}
+        <p className={`text-xs font-semibold mt-1 opacity-75 ${tc}`}>{label}</p>
+      </div>
+    );
+
+    const Logo = ({size}) => {
+      const lg = size==="lg";
+      return (
+        <div className="flex flex-col items-center">
+          <div className={`flex ${lg?"gap-2 mb-2":"gap-1 mb-1"}`}>
+            {["COM","BI","NA"].map(t=>(
+              <div key={t} className={`border-[3px] border-black rounded-xl bg-white ${lg?"px-4 py-2":"px-2 py-1"}`}>
+                <span className={`font-black text-black leading-none ${lg?"text-3xl":"text-sm"}`}>{t}</span>
+              </div>
+            ))}
+          </div>
+          <p className={`font-bold ${lg?"text-sm":"text-xs"}`}>
+            <span className="text-red-600 font-black">CONTINENTE</span>
+            <span className="text-gray-400"> + </span>
+            <span className="text-orange-500 font-black">galp</span>
+            <span className="text-gray-400"> + </span>
+            <span className="font-black text-black">N</span><span className="font-black text-gray-400">OS</span>
+          </p>
+        </div>
+      );
+    };
+
+    const vendasOpts = ic => ic===3
+      ? [["alarme","🔒 Alarme"]]
+      : [["energia","⚡ Energia Galp"],["novoCliente","📱 Novo Cliente NOS"],["alarme","🔒 Alarme"]];
+
+    function App() {
+      const [tab,setTab]           = useState("novo");
+      const [records,setRecs]      = useState(loadCache);
+      const [loading,setLoading]   = useState(true);
+      const [syncing,setSyncing]   = useState(false);
+      const [online,setOnline]     = useState(true);
+      const [lastSync,setLastSync] = useState(null);
+      const [session,setSession]   = useState(loadSession);
+      const [loginForm,setLoginForm] = useState({colaborador:"",horaEntrada:"",horaSaida:""});
+
+      const [step,setStep]           = useState(0);
+      const [recusou,setRecusou]     = useState(null);
+      const [isCombina,setIsCombina] = useState(null);
+      const [vendeuCombina,setVC]    = useState(null);
+      const [isNos,setIsNos]         = useState(null);
+      const [vendas,setVendas]       = useState({energia:false,novoCliente:false,alarme:false});
+      const [criarLead,setCriarLead] = useState(null);
+      const [leadNome,setLeadNome]   = useState("");
+      const [leadTel,setLeadTel]     = useState("");
+      const [leadObs,setLeadObs]     = useState("");
+      const [flash,setFlash]         = useState(false);
+      const [showReport,setShowReport] = useState(false);
+      const [period,setPeriod]       = useState("today");
+      const [clearConfirm,setCC]     = useState(false);
+
+      const fetchData = useCallback(async () => {
+        try {
+          const {data,error} = await db.from("abordagens").select("*").order("ts",{ascending:false});
+          if (error) throw error;
+          const recs = (data||[]).map(fromRow);
+          setRecs(recs); saveCache(recs);
+          setOnline(true); setLastSync(new Date());
+        } catch(e) {
+          setOnline(false);
+        } finally { setLoading(false); }
+      }, []);
+
+      useEffect(() => {
+        fetchData();
+        const t = setInterval(fetchData, 60000);
+        return () => clearInterval(t);
+      }, [fetchData]);
+
+      useEffect(() => {
+        if (!online) return;
+        const q = loadQueue();
+        if (!q.length) return;
+        db.from("abordagens").upsert(q).then(({error}) => {
+          if (!error) { saveQueue([]); fetchData(); }
+        });
+      }, [online, fetchData]);
+
+      const reset = () => {
+        setStep(0); setRecusou(null); setIsCombina(null); setVC(null);
+        setIsNos(null); setVendas({energia:false,novoCliente:false,alarme:false});
+        setCriarLead(null); setLeadNome(""); setLeadTel(""); setLeadObs("");
+      };
+
+      const doLogin  = () => { const s={...loginForm,loginTs:new Date().toISOString()}; setSession(s); saveSession(s); };
+      const doLogout = () => { clearSession(); setSession(null); setShowReport(false); reset(); };
+
+      const steps = (() => {
+        if (recusou===true) return ["abordagem"];
+        const s = ["abordagem","combina"];
+        if (isCombina===false) s.push("vendeuCombina");
+        if (isCombina!==3 && isCombina!==null) s.push("nos");
+        if (isCombina!==null) s.push("vendas");
+        if (criarLead===true) s.push("lead");
+        return s;
+      })();
+
+      const sn = steps[step];
+      const isFinal = (sn==="abordagem"&&recusou===true)||(sn==="vendas"&&criarLead===false)||sn==="lead";
+      const canNext = ({abordagem:recusou!==null,combina:isCombina!==null,vendeuCombina:vendeuCombina!==null,nos:isNos!==null,vendas:criarLead!==null,lead:true})[sn]??false;
+
+      const saveRecord = async () => {
+        const r = {
+          id: Date.now(), ts: new Date().toISOString(),
+          colaborador: session.colaborador, horaEntrada: session.horaEntrada, horaSaida: session.horaSaida,
+          recusou,
+          isCombina:     recusou?null:isCombina,
+          vendeuCombina: recusou?null:(isCombina===false?vendeuCombina:null),
+          isNos:         recusou?null:(isCombina===3?true:isNos),
+          vendas:        recusou?null:vendas,
+          lead:          criarLead?{nome:leadNome||"—",tel:leadTel,obs:leadObs}:null,
+        };
+        setRecs(p=>[r,...p]); setSyncing(true);
+        try {
+          const {error} = await db.from("abordagens").insert([toRow(r)]);
+          if (error) throw error;
+          setOnline(true);
+        } catch {
+          setOnline(false);
+          const q=loadQueue(); q.push(toRow(r)); saveQueue(q);
+        } finally {
+          setSyncing(false); setFlash(true);
+          setTimeout(()=>{setFlash(false);reset();},1500);
+        }
+      };
+
+      const today  = records.filter(r=>new Date(r.ts).toDateString()===todayStr());
+      const shown  = period==="today"?today:records;
+      const s      = stats(shown);
+      const myT    = session?today.filter(r=>r.colaborador===session.colaborador):[];
+      const myS    = stats(myT);
+      const mySold = myT.filter(r=>r.vendeuCombina===true).length;
+      const allSold= shown.filter(r=>r.vendeuCombina===true).length;
+      const totV   = myS.energia+myS.novoCliente+myS.alarme+mySold;
+      const txConv = myS.conversas>0?Math.round(totV/myS.conversas*100):0;
+      const qLen   = loadQueue().length;
+      const dtag   = new Date().toLocaleDateString("pt-PT").replace(/\//g,"-");
+
+      const reportText = () => [
+        `📋 RELATÓRIO — ${new Date().toLocaleDateString("pt-PT")}`,
+        `👤 ${session?.colaborador} | 🕐 ${session?.horaEntrada}–${session?.horaSaida}`,
+        ``,`📊 ABORDAGENS`,
+        `• Total: ${myS.total} | Conversas: ${myS.conversas} | Recusas: ${myS.recusas}`,
+        ``,`🛒 PERFIL COMBINA`,
+        `• Sem Combina: ${myS.c0}${mySold?` (ativou: ${mySold})`:""}`,
+        `• C1: ${myS.c1} | C2: ${myS.c2} | C3: ${myS.c3}`,
+        ``,`💰 VENDAS (${totV})`,
+        `• 🃏 ${mySold} Combina | ⚡ ${myS.energia} Energia | 📱 ${myS.novoCliente} Novo NOS | 🔒 ${myS.alarme} Alarme`,
+        ``,`📩 LEADS: ${myS.leads}`,
+        ...myT.filter(r=>r.lead).map(r=>`   - ${r.lead.nome}${r.lead.tel?` · ${r.lead.tel}`:""}${r.lead.obs?` | ${r.lead.obs}`:""}`),
+        ``,`📈 Taxa: ${txConv}%`,
+      ].join("\n");
+
+      const copyReport = () => {
+        const t=reportText();
+        if(navigator.clipboard){navigator.clipboard.writeText(t).catch(()=>fallback(t));}else{fallback(t);}
+      };
+      const fallback = t => {
+        const el=document.createElement("textarea"); el.value=t;
+        document.body.appendChild(el); el.select();
+        document.execCommand("copy"); document.body.removeChild(el);
+      };
+
+      const canLogin = loginForm.colaborador.trim()&&loginForm.horaEntrada&&loginForm.horaSaida;
+
+      // ── LOADING ──
+      if (loading) return (
+        <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">
+          <Logo size="lg" />
+          <div className="w-8 h-8 border-4 border-black border-t-transparent rounded-full spin" />
+          <p className="text-xs text-gray-400 font-bold">A ligar...</p>
+        </div>
+      );
+
+      // ── LOGIN ──
+      if (!session) return (
+        <div className="min-h-screen bg-gray-50 flex flex-col">
+          <div className="bg-white px-4 py-8 text-center border-b shadow-sm">
+            <Logo size="lg" />
+            <p className="text-gray-400 text-xs font-bold mt-3 tracking-widest uppercase">Quiosque · Lojas NOS</p>
+          </div>
+          <div className="flex-1 flex items-center justify-center p-6">
+            <div className="bg-white rounded-2xl p-6 shadow-sm w-full max-w-sm">
+              <p className="text-xs font-black text-gray-400 uppercase tracking-wider mb-5">Iniciar turno</p>
+              <label className="text-xs font-bold text-gray-500 mb-1 block">Nome</label>
+              <input value={loginForm.colaborador} onChange={e=>setLoginForm(f=>({...f,colaborador:e.target.value}))}
+                placeholder="O teu nome"
+                className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm mb-4 focus:outline-none focus:border-black" />
+              <div className="flex gap-3 mb-6">
+                {[["horaEntrada","Hora entrada"],["horaSaida","Hora saída"]].map(([k,l])=>(
+                  <div key={k} className="flex-1">
+                    <label className="text-xs font-bold text-gray-500 mb-1 block">{l}</label>
+                    <input type="time" value={loginForm[k]} onChange={e=>setLoginForm(f=>({...f,[k]:e.target.value}))}
+                      className="w-full border-2 border-gray-200 rounded-xl px-3 py-3 text-sm focus:outline-none focus:border-black" />
+                  </div>
+                ))}
+              </div>
+              <button onClick={doLogin} disabled={!canLogin}
+                className={`w-full py-4 rounded-2xl font-black text-base text-white ${canLogin?"bg-black active:scale-95":"bg-gray-200 text-gray-400 cursor-not-allowed"} transition-all`}>
+                Entrar →
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+
+      // ── REPORT ──
+      if (showReport) return (
+        <div className="min-h-screen bg-gray-50">
+          <div className="bg-white px-4 py-3 shadow-sm border-b flex items-center gap-3">
+            <button onClick={()=>setShowReport(false)} className="font-black text-2xl text-gray-600 pr-2">←</button>
+            <p className="font-black text-gray-800">Relatório de Turno</p>
+          </div>
+          <div className="p-4 max-w-md mx-auto space-y-3 pb-10">
+            <div className="bg-white rounded-2xl p-4 shadow-sm">
+              <p className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3">
+                {session.colaborador} · {session.horaEntrada}–{session.horaSaida}
+              </p>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <KPI label="Abordagens" value={myS.total} bg="bg-orange-50" tc="text-orange-600" />
+                <KPI label="Recusas" value={myS.recusas} bg="bg-red-50" tc="text-red-500" />
+                <KPI label="Conversas" value={myS.conversas} bg="bg-blue-50" tc="text-blue-700" />
+                <KPI label="Tx. Conversão" value={`${txConv}%`} bg="bg-green-50" tc="text-green-700" />
+              </div>
+              <div className="border-t pt-3 mb-3">
+                <p className="text-xs font-black text-gray-400 mb-2">🛒 Perfil Combina</p>
+                {[["Sem Combina",myS.c0,"bg-gray-400"],["Combina 1",myS.c1,"bg-yellow-400"],["Combina 2",myS.c2,"bg-blue-400"],["Combina 3",myS.c3,"bg-green-500"]].map(([l,v,c])=>(
+                  <div key={l} className="mb-2">
+                    <div className="flex justify-between text-xs mb-1"><span className="font-bold text-gray-600">{l}</span><span className="font-black">{v}</span></div>
+                    <Bar value={v} max={myS.conversas||1} color={c} />
+                  </div>
+                ))}
+                {mySold>0&&<div className="mt-2 bg-yellow-50 border border-yellow-200 rounded-xl p-2.5"><p className="text-xs font-black text-yellow-700">🃏 Combina novos ativados: {mySold}</p></div>}
+              </div>
+              <div className="border-t pt-3 mb-3">
+                <p className="text-xs font-black text-gray-400 mb-2">💰 Vendas ({totV})</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[["🃏 Combina",mySold,"bg-yellow-50 text-yellow-700"],["⚡ Energia",myS.energia,"bg-green-50 text-green-700"],["📱 Novo NOS",myS.novoCliente,"bg-orange-50 text-orange-700"],["🔒 Alarme",myS.alarme,"bg-purple-50 text-purple-700"]].map(([l,v,c])=>(
+                    <div key={l} className={`text-center rounded-xl p-3 ${c}`}><p className="text-2xl font-black">{v}</p><p className="text-xs font-bold">{l}</p></div>
+                  ))}
+                </div>
+              </div>
+              {myS.leads>0&&(
+                <div className="border-t pt-3">
+                  <p className="text-xs font-black text-gray-400 mb-2">📩 Leads ({myS.leads})</p>
+                  {myT.filter(r=>r.lead).map(r=>(
+                    <div key={r.id} className="bg-blue-50 rounded-xl p-2.5 mb-1.5">
+                      <p className="text-xs font-black text-blue-700">{r.lead.nome}{r.lead.tel?` · ${r.lead.tel}`:""}</p>
+                      {r.lead.obs&&<p className="text-xs text-blue-500 italic">{r.lead.obs}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button onClick={copyReport} className="w-full py-4 rounded-2xl bg-blue-500 text-white font-black text-base active:scale-95 transition-all">📋 Copiar para WhatsApp</button>
+            <button onClick={()=>exportCSV(myT,`Combina_${session.colaborador}_${dtag}.csv`)} className="w-full py-4 rounded-2xl bg-green-600 text-white font-black text-base active:scale-95 transition-all">📥 Exportar meu turno (CSV)</button>
+            <button onClick={doLogout} className="w-full py-4 rounded-2xl border-2 border-black text-black font-black text-base active:scale-95 transition-all">🚪 Terminar turno</button>
+          </div>
+        </div>
+      );
+
+      // ── APP PRINCIPAL ──
+      return (
+        <div className="min-h-screen bg-gray-50">
+
+          {/* Header limpo para mobile */}
+          <div className="bg-white px-4 py-3 shadow-sm border-b">
+            <div className="flex items-center gap-3">
+              <Logo size="sm" />
+              <div className="flex-1">
+                <div className="flex items-center gap-1.5">
+                  <p className="font-black text-gray-800 text-xs">Quiosque Combina</p>
+                  {/* Só a bolinha de status */}
+                  <div className={`w-2 h-2 rounded-full shrink-0 ${syncing?"bg-orange-400":online?"bg-green-500":"bg-red-400"}`} title={syncing?"A sincronizar...":online?"Ligado":"Offline"} />
+                  {qLen>0&&<span className="text-xs bg-orange-100 text-orange-600 font-bold px-1.5 rounded-lg">{qLen}⏳</span>}
+                </div>
+                <p className="text-gray-400 text-xs">{session.colaborador} · {session.horaEntrada}–{session.horaSaida}</p>
+              </div>
+              <button onClick={fetchData} className="text-gray-300 text-base p-1 active:text-gray-600">🔄</button>
+              <button onClick={()=>setShowReport(true)} className="bg-black text-white text-xs font-black px-3 py-2 rounded-xl active:scale-95 transition-all">📋</button>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex bg-white border-b sticky top-0 z-10 shadow-sm">
+            {[["novo","➕ Novo"],["leads",`📋 (${records.length})`],["dash","📊"]].map(([id,lbl])=>(
+              <button key={id} onClick={()=>setTab(id)}
+                className={`flex-1 py-3.5 text-xs font-black border-b-2 transition-all ${tab===id?"border-black text-black":"border-transparent text-gray-400"}`}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          <div className="p-4 max-w-md mx-auto space-y-3 pb-16">
+
+            {/* ── NOVO ── */}
+            {tab==="novo"&&(
+              <div className="bg-white rounded-2xl p-5 shadow-sm">
+                <div className="flex gap-1 mb-5">
+                  {steps.map((_,i)=><div key={i} className={`h-1.5 flex-1 rounded-full ${i<=step?"bg-black":"bg-gray-200"}`} />)}
+                </div>
+
+                {sn==="abordagem"&&<>
+                  <p className="text-lg font-black text-gray-700 mb-1">O cliente ouviu?</p>
+                  <p className="text-xs text-gray-400 mb-5">Se ficou a ouvir, mesmo sem comprar, é "Conversou"</p>
+                  <div className="flex gap-3">
+                    {[[false,"😊","Conversou","border-green-500 bg-green-50 text-green-700"],[true,"😐","Recusou","border-red-400 bg-red-50 text-red-500"]].map(([v,ic,lb,ac])=>(
+                      <button key={String(v)} onClick={()=>setRecusou(v)}
+                        className={`flex-1 py-10 rounded-2xl border-2 text-sm font-black transition-all active:scale-95 ${recusou===v?ac:"border-gray-200 text-gray-400"}`}>
+                        <span className="text-3xl block mb-1">{ic}</span>{lb}
+                      </button>
+                    ))}
+                  </div>
+                </>}
+
+                {sn==="combina"&&<>
+                  <p className="text-lg font-black text-gray-700 mb-1">É cliente Combina?</p>
+                  <p className="text-xs text-gray-400 mb-5">Tem Cartão Continente com parceiros?</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[[false,"❌","Sem Combina","border-gray-400 bg-gray-100 text-gray-700"],[1,"1️⃣","Combina 1","border-yellow-400 bg-yellow-50 text-yellow-700"],[2,"2️⃣","Combina 2","border-blue-400 bg-blue-50 text-blue-700"],[3,"3️⃣","Combina 3","border-green-500 bg-green-50 text-green-700"]].map(([v,ic,lb,ac])=>(
+                      <button key={String(v)} onClick={()=>setIsCombina(v)}
+                        className={`py-5 rounded-2xl border-2 text-sm font-black transition-all active:scale-95 ${isCombina===v?ac:"border-gray-200 text-gray-400"}`}>
+                        <span className="text-2xl block mb-1">{ic}</span>{lb}
+                      </button>
+                    ))}
+                  </div>
+                  {isCombina===3&&<div className="mt-3 bg-green-50 border border-green-200 rounded-xl p-3"><p className="text-xs font-bold text-green-700">✅ Já tem NOS e Galp — só pode vender Alarme</p></div>}
+                </>}
+
+                {sn==="vendeuCombina"&&<>
+                  <p className="text-lg font-black text-gray-700 mb-1">🃏 Sem Combina</p>
+                  <p className="text-xs text-gray-400 mb-5">Conseguiste ativar o Combina?</p>
+                  <div className="flex gap-3">
+                    {[[true,"✅","Combina ativado","border-yellow-500 bg-yellow-50 text-yellow-700"],[false,"❌","Não ativou","border-gray-400 bg-gray-100 text-gray-600"]].map(([v,ic,lb,ac])=>(
+                      <button key={String(v)} onClick={()=>setVC(v)}
+                        className={`flex-1 py-10 rounded-2xl border-2 text-sm font-black transition-all active:scale-95 ${vendeuCombina===v?ac:"border-gray-200 text-gray-400"}`}>
+                        <span className="text-3xl block mb-1">{ic}</span>{lb}
+                      </button>
+                    ))}
+                  </div>
+                </>}
+
+                {sn==="nos"&&<>
+                  <p className="text-lg font-black text-gray-700 mb-5">É cliente NOS?</p>
+                  <div className="flex gap-3">
+                    {[[true,"✅","Cliente NOS","border-black bg-gray-100 text-gray-800"],[false,"❌","Sem NOS","border-blue-400 bg-blue-50 text-blue-600"]].map(([v,ic,lb,ac])=>(
+                      <button key={String(v)} onClick={()=>setIsNos(v)}
+                        className={`flex-1 py-10 rounded-2xl border-2 text-sm font-black transition-all active:scale-95 ${isNos===v?ac:"border-gray-200 text-gray-400"}`}>
+                        <span className="text-3xl block mb-1">{ic}</span>{lb}
+                      </button>
+                    ))}
+                  </div>
+                </>}
+
+                {sn==="vendas"&&<>
+                  <p className="text-lg font-black text-gray-700 mb-1">O que foi vendido?</p>
+                  <p className="text-xs text-gray-400 mb-4">{isCombina===3?"Combina 3 — apenas Alarme":"Seleciona tudo o que se aplicar"}</p>
+                  <div className="space-y-3 mb-6">
+                    {vendasOpts(isCombina).map(([key,label])=>(
+                      <button key={key} onClick={()=>setVendas(v=>({...v,[key]:!v[key]}))}
+                        className={`w-full py-4 px-4 rounded-xl border-2 text-base font-bold text-left flex items-center gap-4 transition-all active:scale-95 ${vendas[key]?"border-black bg-gray-100 text-gray-800":"border-gray-200 text-gray-400"}`}>
+                        <span className={`w-7 h-7 rounded-lg border-2 flex items-center justify-center text-sm shrink-0 ${vendas[key]?"border-black bg-black text-white":"border-gray-300"}`}>{vendas[key]?"✓":""}</span>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-sm font-bold text-gray-600 mb-3">Criar Lead para follow-up?</p>
+                  <div className="flex gap-2">
+                    {[[false,"Não","border-gray-400 bg-gray-100 text-gray-600"],[true,"📩 Criar Lead","border-blue-500 bg-blue-50 text-blue-700"]].map(([v,lb,ac])=>(
+                      <button key={String(v)} onClick={()=>setCriarLead(v)}
+                        className={`flex-1 py-4 rounded-xl border-2 text-sm font-bold transition-all active:scale-95 ${criarLead===v?ac:"border-gray-200 text-gray-400"}`}>{lb}</button>
+                    ))}
+                  </div>
+                </>}
+
+                {sn==="lead"&&<>
+                  <p className="text-lg font-black text-gray-700 mb-5">📩 Dados do Lead</p>
+                  <input value={leadNome} onChange={e=>setLeadNome(e.target.value)} placeholder="Nome do cliente" className="w-full border-2 border-gray-200 rounded-xl px-4 py-4 mb-3 focus:outline-none focus:border-black" />
+                  <input value={leadTel} onChange={e=>setLeadTel(e.target.value)} placeholder="Telefone" type="tel" className="w-full border-2 border-gray-200 rounded-xl px-4 py-4 mb-3 focus:outline-none focus:border-black" />
+                  <textarea value={leadObs} onChange={e=>setLeadObs(e.target.value)} placeholder="Produto de interesse, hora para contactar..." rows="3" className="w-full border-2 border-gray-200 rounded-xl px-4 py-4 focus:outline-none focus:border-black resize-none" />
+                </>}
+
+                <div className="flex gap-2 mt-6">
+                  {step>0&&!flash&&<button onClick={()=>setStep(s=>s-1)} className="px-6 py-4 rounded-xl border-2 border-gray-200 text-gray-500 font-bold text-lg active:scale-95">←</button>}
+                  {isFinal
+                    ? <button onClick={saveRecord} disabled={flash} className={`flex-1 py-4 rounded-2xl font-black text-base text-white transition-all active:scale-95 ${flash?"bg-green-500":"bg-black"}`}>{flash?"✅ Guardado!":"💾 Guardar"}</button>
+                    : <button onClick={()=>setStep(s=>s+1)} disabled={!canNext} className={`flex-1 py-4 rounded-2xl font-black text-base text-white transition-all active:scale-95 ${canNext?"bg-black":"bg-gray-200 text-gray-400 cursor-not-allowed"}`}>Seguinte →</button>
+                  }
+                </div>
+              </div>
+            )}
+
+            {/* ── REGISTOS ── */}
+            {tab==="leads"&&<>
+              <div className="flex gap-2">
+                {[["today","📅 Hoje"],["all","📋 Todos"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>setPeriod(v)} className={`flex-1 py-3 rounded-xl border-2 text-sm font-bold ${period===v?"border-black bg-gray-100 text-black":"border-gray-200 text-gray-400"}`}>{l}</button>
+                ))}
+              </div>
+              {shown.length===0
+                ? <div className="bg-white rounded-2xl p-10 text-center"><p className="text-5xl mb-2">📋</p><p className="text-gray-400 font-bold">Sem registos</p></div>
+                : shown.map(r=>(
+                  <div key={r.id} className={`rounded-2xl p-4 border-2 shadow-sm ${r.recusou?"bg-gray-50 border-gray-200":"bg-white border-gray-200"}`}>
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 flex flex-wrap gap-1">
+                        {r.recusou
+                          ? <span className="bg-red-100 text-red-500 text-xs font-black px-2 py-0.5 rounded-lg">😐 Recusa</span>
+                          : <>
+                              {r.isCombina===false&&<span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-0.5 rounded-lg">Sem Combina</span>}
+                              {r.vendeuCombina===true&&<span className="bg-yellow-100 text-yellow-700 text-xs font-bold px-2 py-0.5 rounded-lg">🃏 Combina ✓</span>}
+                              {r.isCombina>0&&<span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-lg">C{r.isCombina}{r.isCombina===3?" ✅":""}</span>}
+                              {r.isNos===true&&r.isCombina!==3&&<span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-0.5 rounded-lg">NOS ✓</span>}
+                              {r.isNos===false&&<span className="bg-gray-100 text-gray-400 text-xs font-bold px-2 py-0.5 rounded-lg">Sem NOS</span>}
+                              {r.vendas?.energia&&<span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-lg">⚡</span>}
+                              {r.vendas?.novoCliente&&<span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-0.5 rounded-lg">📱</span>}
+                              {r.vendas?.alarme&&<span className="bg-purple-100 text-purple-700 text-xs font-bold px-2 py-0.5 rounded-lg">🔒</span>}
+                              {r.lead&&<span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-lg">📩</span>}
+                              {!r.vendas?.energia&&!r.vendas?.novoCliente&&!r.vendas?.alarme&&!r.lead&&!r.vendeuCombina&&<span className="bg-yellow-50 text-yellow-600 text-xs font-bold px-2 py-0.5 rounded-lg">Sem resultado</span>}
+                            </>
+                        }
+                      </div>
+                      <div className="text-right ml-2 shrink-0">
+                        <p className="text-xs text-gray-400">{fmt(r.ts,"date")} {fmt(r.ts,"time")}</p>
+                        <p className="text-xs text-gray-500 font-bold">{r.colaborador}</p>
+                      </div>
+                    </div>
+                    {r.lead&&<div className="mt-2 bg-blue-50 rounded-xl p-2.5">
+                      <p className="text-xs font-black text-blue-700">{r.lead.nome}{r.lead.tel?` · ${r.lead.tel}`:""}</p>
+                      {r.lead.obs&&<p className="text-xs text-blue-500 italic mt-0.5">{r.lead.obs}</p>}
+                    </div>}
+                  </div>
+                ))
+              }
+            </>}
+
+            {/* ── DASHBOARD ── */}
+            {tab==="dash"&&<>
+              <div className="flex gap-2">
+                {[["today","📅 Hoje"],["all","📋 Acumulado"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>setPeriod(v)} className={`flex-1 py-3 rounded-xl border-2 text-sm font-bold ${period===v?"border-black bg-gray-100 text-black":"border-gray-200 text-gray-400"}`}>{l}</button>
+                ))}
+              </div>
+
+              <div className="bg-black rounded-2xl p-4 flex items-center justify-between text-white">
+                <div>
+                  <p className="text-4xl font-black">{records.length}</p>
+                  <p className="text-xs opacity-60 mt-1">registos totais{lastSync?` · ${lastSync.toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"})}`:""}</p>
+                </div>
+                <button onClick={fetchData} className="bg-white bg-opacity-10 rounded-xl p-3 text-xl active:scale-95">🔄</button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <KPI label="Abordagens" value={s.total} bg="bg-orange-50" tc="text-orange-600" />
+                <KPI label="Recusas" value={s.recusas} sub={s.total?`${Math.round(s.recusas/s.total*100)}%`:"—"} bg="bg-red-50" tc="text-red-500" />
+                <KPI label="Conversas" value={s.conversas} bg="bg-blue-50" tc="text-blue-700" />
+                <KPI label="Tx. Conversão" value={`${s.conversas>0?Math.round((s.energia+s.novoCliente+s.alarme+allSold)/s.conversas*100):0}%`} bg="bg-green-50" tc="text-green-700" />
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 shadow-sm">
+                <p className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3">🛒 Perfil Combina</p>
+                {[["Sem Combina",s.c0,"bg-gray-400"],["Combina 1",s.c1,"bg-yellow-400"],["Combina 2",s.c2,"bg-blue-400"],["Combina 3",s.c3,"bg-green-500"]].map(([l,v,c])=>(
+                  <div key={l} className="mb-3">
+                    <div className="flex justify-between text-xs mb-1"><span className="font-bold text-gray-600">{l}</span><span className="font-black">{v}</span></div>
+                    <Bar value={v} max={s.conversas||1} color={c} />
+                  </div>
+                ))}
+                {allSold>0&&<div className="mt-1 bg-yellow-50 border border-yellow-200 rounded-xl p-2.5"><p className="text-xs font-black text-yellow-700">🃏 Combina novos ativados: {allSold}</p></div>}
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 shadow-sm">
+                <p className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3">💰 Vendas</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[["🃏 Combina",allSold,"bg-yellow-50 text-yellow-700"],["⚡ Energia",s.energia,"bg-green-50 text-green-700"],["📱 Novo NOS",s.novoCliente,"bg-orange-50 text-orange-700"],["🔒 Alarme",s.alarme,"bg-purple-50 text-purple-700"]].map(([l,v,c])=>(
+                    <div key={l} className={`text-center rounded-xl p-4 ${c}`}><p className="text-3xl font-black">{v}</p><p className="text-xs font-bold mt-1">{l}</p></div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 shadow-sm">
+                <p className="text-xs font-black text-gray-400 uppercase tracking-wider mb-2">📩 Leads</p>
+                <div className="text-center bg-blue-50 rounded-xl p-4">
+                  <p className="text-4xl font-black text-blue-700">{s.leads}</p>
+                  <p className="text-xs font-bold text-blue-500 mt-1">leads captados</p>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 shadow-sm">
+                <p className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3">📥 Exportar</p>
+                <div className="space-y-2">
+                  <button onClick={()=>exportCSV(today,`Combina_Hoje_${dtag}.csv`)} className="w-full py-4 rounded-xl bg-blue-50 border-2 border-blue-200 text-blue-700 font-black text-sm active:scale-95 transition-all">📅 Hoje ({today.length})</button>
+                  <button onClick={()=>exportCSV(records,`Combina_15dias_${dtag}.csv`)} className="w-full py-4 rounded-xl bg-green-50 border-2 border-green-300 text-green-700 font-black text-sm active:scale-95 transition-all">💾 15 dias completos ({records.length})</button>
+                </div>
+              </div>
+
+              {records.length>0&&(!clearConfirm
+                ? <button onClick={()=>setCC(true)} className="w-full py-3 rounded-2xl border-2 border-red-200 text-red-400 text-sm font-bold active:scale-95">🗑 Limpar dados</button>
+                : <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-4 text-center">
+                    <p className="text-sm font-bold text-red-700 mb-3">Tens a certeza? Irreversível.</p>
+                    <div className="flex gap-2">
+                      <button onClick={()=>setCC(false)} className="flex-1 py-3 rounded-xl border-2 border-gray-300 text-gray-600 font-bold text-sm">Cancelar</button>
+                      <button onClick={()=>{setRecs([]);saveCache([]);setCC(false);}} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-bold text-sm">Apagar</button>
+                    </div>
+                  </div>
+              )}
+            </>}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
