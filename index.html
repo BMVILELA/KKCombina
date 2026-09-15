@@ -213,7 +213,6 @@ const RadioCard=({label,selected,onClick,selColor="green"})=>{
 const CheckCard=({label,checked,onClick,acaoProposta=false})=>(
   <div className={`rounded-2xl overflow-hidden border-2 transition-all
     ${checked?"border-emerald-500":acaoProposta?"border-amber-300":"border-gray-100"}`}>
-    {/* [FIX 3] Banner mínimo — só uma linha fina com texto micro */}
     {acaoProposta&&(
       <div className="flex items-center gap-1.5 px-3 py-[3px]"
         style={{background:"linear-gradient(90deg,#fbbf24 0%,#fde68a 100%)"}}>
@@ -299,6 +298,7 @@ function App(){
   const [vendas,setVendas]=useState({combina:false,energia:false,novoCliente:false,alarme:false,outros:false,outrosDesc:""});
   const [lead,setLead]=useState({active:false,nome:"",tel:"",obs:""});
   const [flash,setFlash]=useState(false);
+  const [saving,setSaving]=useState(false);
 
   const [histDate,setHistDate]=useState(todayISO());
   const [histFilter,setHistFilter]=useState("all");
@@ -373,8 +373,10 @@ function App(){
   const canLogin=lUser.trim()&&lQ&&lTurno&&(lTurno!=="custom"||(lCustomIn&&lCustomOut));
 
   const saveRecord=async()=>{
+    if(saving)return;
+    setSaving(true);
     const r={
-      id:Date.now(),ts:localISO(),
+      id:Date.now()*1000+Math.floor(Math.random()*1000),ts:localISO(),
       colaborador:session.colaborador,quiosque:session.quiosque,
       horaEntrada:session.horaEntrada,horaSaida:session.horaSaida,
       aceitou,temContinente:aceitou?temContinente:null,clienteNOS:aceitou?clienteNOS:null,
@@ -387,9 +389,9 @@ function App(){
     else if(r.lead)r.tipo="lead";
     else r.tipo="sem_venda";
     setRecs(p=>[r,...p]);setSyncing(true);
-    try{const{error}=await db.from("abordagens").insert([toRow(r)]);if(error)throw error;setOnline(true);}
+    try{const{error}=await db.from("abordagens").upsert([toRow(r)],{onConflict:"id"});if(error)throw error;setOnline(true);}
     catch{setOnline(false);const q=lsa(QK);q.push(toRow(r));lss(QK,q);}
-    finally{setSyncing(false);setFlash(true);setTimeout(()=>{setFlash(false);reset();},1600);}
+    finally{setSyncing(false);setSaving(false);setFlash(true);setTimeout(()=>{setFlash(false);reset();},1600);}
   };
 
   const today=records.filter(r=>new Date(r.ts).toDateString()===todayStr());
@@ -480,14 +482,13 @@ function App(){
           </div>
           <div>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Turno</p>
-            {/* [FIX 1] Turno selecionado = verde (igual às outras seleções da app) */}
             <div className="grid grid-cols-2 gap-2">
               {TURNOS.map(t=>(
                 <button key={t.id} onClick={()=>setLTurno(t.id)}
                   className={`py-4 rounded-2xl border-2 text-left px-4 transition-all active:scale-[.97]
-                    ${lTurno===t.id?"border-emerald-500 bg-emerald-50":"border-gray-100 bg-gray-50"}`}>
-                  <p className={`font-black text-sm leading-tight ${lTurno===t.id?"text-emerald-800":"text-gray-800"}`}>{t.label}</p>
-                  <p className={`text-xs mt-0.5 font-medium ${lTurno===t.id?"text-emerald-600":"text-gray-400"}`}>{t.sub}</p>
+                    ${lTurno===t.id?"border-gray-900 bg-gray-900":"border-gray-100 bg-gray-50"}`}>
+                  <p className={`font-black text-sm leading-tight ${lTurno===t.id?"text-white":"text-gray-800"}`}>{t.label}</p>
+                  <p className={`text-xs mt-0.5 font-medium ${lTurno===t.id?"text-gray-400":"text-gray-400"}`}>{t.sub}</p>
                 </button>
               ))}
             </div>
@@ -694,7 +695,7 @@ function App(){
                   </div>
                 </div>
 
-                {/* [FIX 2] Perfil Combina — sem legendas, seleção a amarelo */}
+                {/* Perfil Combina */}
                 {temContinente===true&&(
                   <div className="pop">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Perfil Combina</p>
@@ -708,7 +709,7 @@ function App(){
                 )}
               </div>}
 
-              {/* Passo 3 — Vendas com banner Ação Proposta micro */}
+              {/* Passo 3 — Vendas */}
               {sn==="vendas"&&<div className="pop space-y-2">
                 <p className="text-xl font-black text-gray-900 mb-1">Resultado</p>
                 <p className="text-sm text-gray-400 font-medium mb-4">O que foi vendido?</p>
@@ -731,10 +732,10 @@ function App(){
                   <button onClick={()=>setStep(s=>s-1)} className="px-5 py-4 rounded-2xl border border-gray-200 text-gray-500 font-bold text-sm active:scale-95 transition-all">←</button>
                 )}
                 {isFinal
-                  ?<button onClick={saveRecord} disabled={flash}
+                  ?<button onClick={saveRecord} disabled={flash||saving}
                     className={`flex-1 py-4 rounded-2xl font-bold text-sm tracking-wide transition-all active:scale-95 shadow-sm
-                      ${flash?"bg-emerald-600 text-white":"bg-gray-900 text-white disabled:bg-gray-100 disabled:text-gray-300"}`}>
-                    {flash?"Guardado!":"Guardar"}
+                      ${flash?"bg-emerald-600 text-white":saving?"bg-gray-400 text-white cursor-wait":"bg-gray-900 text-white disabled:bg-gray-100 disabled:text-gray-300"}`}>
+                    {flash?"Guardado!":saving?"A guardar...":"Guardar"}
                   </button>
                   :<button onClick={()=>setStep(s=>s+1)} disabled={!canNext}
                     className={`flex-1 py-4 rounded-2xl font-bold text-sm tracking-wide transition-all active:scale-95 shadow-sm
