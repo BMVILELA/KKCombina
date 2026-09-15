@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover"/>
-  <title>Quiosque Combina v23</title>
+  <title>Quiosque Combina v24</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
@@ -255,12 +255,9 @@ const KPILeads=({total})=>(
     <p className="text-xs font-medium mt-1" style={{color:"#2563eb"}}>para follow-up</p>
   </div>
 );
-const LiveViewBar=({abordagens,vendas,leads,taxa,pending})=>(
+const LiveViewBar=({abordagens,vendas,leads,taxa})=>(
   <div className="bg-white rounded-3xl shadow-sm px-3 py-3">
-    <div className="flex items-center justify-between px-1 mb-2">
-      <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">📊 Ponto de Situação</p>
-      {pending>0&&<span className="text-[9px] font-bold text-amber-500 bg-amber-50 px-2 py-0.5 rounded-full">⏳ {pending} a sincronizar</span>}
-    </div>
+    <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400 mb-2 px-1">📊 Ponto de Situação</p>
     <div className="flex">
       {[[abordagens,"Abord.","#1f2937"],[vendas,"Vendas","#059669"],[leads,"Leads","#2563eb"],[`${taxa}%`,"Conv.","#1f2937"]].map(([v,l,c],i)=>(
         <React.Fragment key={l}>
@@ -282,8 +279,6 @@ function App(){
   const [loading,setLoading]=useState(true);
   const [syncing,setSyncing]=useState(false);
   const [online,setOnline]=useState(true);
-  // Nº de registos pendentes de sync (na queue)
-  const [pendingCount,setPendingCount]=useState(()=>lsa(QK).length);
   const [session,setSession]=useState(()=>ls(SK));
 
   const [lUser,setLUser]=useState("");
@@ -321,32 +316,31 @@ function App(){
   const [fechoObs,setFechoObs]=useState("");
   const [guestMode,setGuestMode]=useState(false);
 
-  const refreshPending=()=>setPendingCount(lsa(QK).length);
-
   const fetchData=useCallback(async()=>{
     try{
       const{data,error}=await db.from("abordagens").select("*").order("ts",{ascending:false});
       if(error)throw error;
       const fromSupabase=(data||[]).map(fromRow);
-      // Mantém registos da queue que ainda não chegaram ao Supabase
+      // IDs já confirmados no Supabase — limpa-os da queue
       const supabaseIds=new Set(fromSupabase.map(x=>String(x.id)));
-      const queued=lsa(QK).map(fromRow).filter(x=>!supabaseIds.has(String(x.id)));
+      const q=lsa(QK);
+      const stillPending=q.filter(x=>!supabaseIds.has(String(x.id)));
+      lss(QK,stillPending);
+      // Merge: pendentes locais + Supabase
+      const queued=stillPending.map(fromRow);
       const merged=[...queued,...fromSupabase].sort((a,b)=>b.ts.localeCompare(a.ts));
       setRecs(merged);lss(CK,merged);setOnline(true);
-      // Flush oportunista da queue — usa insert com ignore on conflict para não precisar de UPDATE permission
-      const q=lsa(QK);
-      if(q.length){
-        db.from("abordagens").insert(q)
+      // Flush oportunista dos pendentes
+      if(stillPending.length){
+        db.from("abordagens").insert(stillPending)
           .then(({error:e})=>{
-            if(!e){lss(QK,[]);setPendingCount(0);}
-            // Se falhou por duplicate key (23505), remove os que já existem no Supabase
-            else if(e.code==="23505"){
-              const remaining=q.filter(x=>!supabaseIds.has(String(x.id)));
-              lss(QK,remaining);setPendingCount(remaining.length);
+            if(!e){lss(QK,[]);}
+            else{
+              // Remove os que já existem (duplicate key) — serão apanhados no próximo fetch
+              const remaining=stillPending.filter(x=>!supabaseIds.has(String(x.id)));
+              lss(QK,remaining);
             }
           });
-      } else {
-        setPendingCount(0);
       }
     }catch{setOnline(false);}
     finally{setLoading(false);}
@@ -408,23 +402,16 @@ function App(){
     else if(hasVenda)r.tipo="venda";
     else if(r.lead)r.tipo="lead";
     else r.tipo="sem_venda";
-    // Optimistic update imediato
     setRecs(p=>[r,...p]);
     setSyncing(true);
     try{
-      // INSERT simples — registo novo com ID único, não precisa de upsert/update
       const{error}=await db.from("abordagens").insert([toRow(r)]);
       if(error)throw error;
       setOnline(true);
-      // Sucesso — garante que não fica na queue
-      const q=lsa(QK).filter(x=>String(x.id)!==String(r.id));
-      lss(QK,q);setPendingCount(q.length);
-    }catch(e){
-      // Falhou — guarda na queue para retry automático no próximo fetchData
+    }catch{
       setOnline(false);
       const q=lsa(QK);
       if(!q.find(x=>String(x.id)===String(r.id))){q.push(toRow(r));lss(QK,q);}
-      setPendingCount(lsa(QK).length);
     }
     finally{
       setSyncing(false);setSaving(false);
@@ -436,10 +423,9 @@ function App(){
     setRecs(p=>p.filter(r=>r.id!==id));
     setConfirmDelete(null);
     const q=lsa(QK).filter(r=>String(r.id)!==String(id));
-    lss(QK,q);setPendingCount(q.length);
-    try{
-      await db.from("abordagens").delete().eq("id",id);
-    }catch(e){console.error("Delete failed",e);}
+    lss(QK,q);
+    try{await db.from("abordagens").delete().eq("id",id);}
+    catch(e){console.error("Delete failed",e);}
   };
 
   const today=records.filter(r=>new Date(r.ts).toDateString()===todayStr());
@@ -662,9 +648,7 @@ function App(){
               <div>
                 <div className="flex items-center gap-1.5">
                   <p className="font-bold text-gray-900 text-xs">{session.quiosque.replace("Quiosque ","")}</p>
-                  {/* Bolinha: verde=ok, amarelo=a guardar, vermelho=sem ligação */}
-                  <div className={`w-1.5 h-1.5 rounded-full ${syncing?"bg-amber-400":online?"bg-emerald-500":"bg-red-400"}`}
-                       title={syncing?"A guardar...":online?"Ligado":"Sem ligação — a guardar localmente"}/>
+                  <div className={`w-1.5 h-1.5 rounded-full ${syncing?"bg-amber-400":online?"bg-emerald-500":"bg-red-400"}`}/>
                 </div>
                 <p className="text-[10px] text-gray-400 font-medium">{session.colaborador} · {session.horaEntrada}–{session.horaSaida}</p>
               </div>
@@ -697,7 +681,7 @@ function App(){
 
         {tab==="novo"&&session&&(
           <div className="space-y-3 fadeUp">
-            <LiveViewBar abordagens={myS.total} vendas={myTotV} leads={myS.leads} taxa={txConv} pending={pendingCount}/>
+            <LiveViewBar abordagens={myS.total} vendas={myTotV} leads={myS.leads} taxa={txConv}/>
             <Card className="p-5">
               <div className="flex gap-1.5 mb-6">
                 {steps.map((_,i)=><div key={i} className={`h-1 flex-1 rounded-full transition-all ${i<=step?"bg-gray-900":"bg-gray-100"}`}/>)}
@@ -750,9 +734,9 @@ function App(){
               {sn==="vendas"&&<div className="pop space-y-2">
                 <p className="text-xl font-black text-gray-900 mb-1">Resultado</p>
                 <p className="text-sm text-gray-400 font-medium mb-4">O que foi vendido?</p>
-                <CheckCard label="Energia Galp"     checked={vendas.energia}     onClick={()=>setVendas(v=>({...v,energia:!v.energia}))}     acaoProposta={acaoProposta.includes("energia")}/>
+                <CheckCard label="Energia Galp"      checked={vendas.energia}     onClick={()=>setVendas(v=>({...v,energia:!v.energia}))}         acaoProposta={acaoProposta.includes("energia")}/>
                 <CheckCard label="Novo Cliente NOS"  checked={vendas.novoCliente} onClick={()=>setVendas(v=>({...v,novoCliente:!v.novoCliente}))} acaoProposta={acaoProposta.includes("novoCliente")}/>
-                <CheckCard label="Combina"           checked={vendas.combina}     onClick={()=>setVendas(v=>({...v,combina:!v.combina}))}     acaoProposta={acaoProposta.includes("combina")}/>
+                <CheckCard label="Combina"           checked={vendas.combina}     onClick={()=>setVendas(v=>({...v,combina:!v.combina}))}         acaoProposta={acaoProposta.includes("combina")}/>
                 <CheckCard label="Alarme"            checked={vendas.alarme}      onClick={()=>setVendas(v=>({...v,alarme:!v.alarme}))}/>
                 <CheckCard label="Outros"            checked={vendas.outros}      onClick={()=>setVendas(v=>({...v,outros:!v.outros,outrosDesc:v.outros?"":v.outrosDesc}))}/>
                 {vendas.outros&&(
