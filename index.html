@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover"/>
-  <title>Quiosque Combina v22</title>
+  <title>Quiosque Combina v23</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
@@ -62,7 +62,6 @@ const fmtDate=iso=>new Date(iso.length<=10?iso+"T12:00:00":iso).toLocaleDateStri
 const fmtTime=iso=>{const d=new Date(iso.length<=10?iso+"T12:00:00":iso);return`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;};
 const isoDay=iso=>iso.slice(0,10);
 
-// Ação proposta por perfil
 const getAcaoProposta=(temContinente,clienteNOS,isCombina)=>{
   if(!temContinente&&!clienteNOS)                     return["energia","novoCliente","combina"];
   if(!temContinente&&clienteNOS)                      return["energia"];
@@ -188,7 +187,6 @@ const ProgressBar=({value,max,color="bg-gray-900"})=>(
   </div>
 );
 
-// RadioCard — cor configurável: "green" (padrão) | "amber" | "red"
 const RadioCard=({label,selected,onClick,selColor="green"})=>{
   const colors={
     green:{border:"border-emerald-500",bg:"bg-emerald-50",text:"text-emerald-800",dot:"border-emerald-500 bg-emerald-500"},
@@ -209,7 +207,6 @@ const RadioCard=({label,selected,onClick,selColor="green"})=>{
   );
 };
 
-// CheckCard — banner "⭐ Ação Proposta" muito fino e discreto
 const CheckCard=({label,checked,onClick,acaoProposta=false})=>(
   <div className={`rounded-2xl overflow-hidden border-2 transition-all
     ${checked?"border-emerald-500":acaoProposta?"border-amber-300":"border-gray-100"}`}>
@@ -258,9 +255,12 @@ const KPILeads=({total})=>(
     <p className="text-xs font-medium mt-1" style={{color:"#2563eb"}}>para follow-up</p>
   </div>
 );
-const LiveViewBar=({abordagens,vendas,leads,taxa})=>(
+const LiveViewBar=({abordagens,vendas,leads,taxa,pending})=>(
   <div className="bg-white rounded-3xl shadow-sm px-3 py-3">
-    <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400 mb-2 px-1">📊 Ponto de Situação</p>
+    <div className="flex items-center justify-between px-1 mb-2">
+      <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">📊 Ponto de Situação</p>
+      {pending>0&&<span className="text-[9px] font-bold text-amber-500 bg-amber-50 px-2 py-0.5 rounded-full">⏳ {pending} a sincronizar</span>}
+    </div>
     <div className="flex">
       {[[abordagens,"Abord.","#1f2937"],[vendas,"Vendas","#059669"],[leads,"Leads","#2563eb"],[`${taxa}%`,"Conv.","#1f2937"]].map(([v,l,c],i)=>(
         <React.Fragment key={l}>
@@ -282,6 +282,8 @@ function App(){
   const [loading,setLoading]=useState(true);
   const [syncing,setSyncing]=useState(false);
   const [online,setOnline]=useState(true);
+  // Nº de registos pendentes de sync (na queue)
+  const [pendingCount,setPendingCount]=useState(()=>lsa(QK).length);
   const [session,setSession]=useState(()=>ls(SK));
 
   const [lUser,setLUser]=useState("");
@@ -302,6 +304,8 @@ function App(){
 
   const [histDate,setHistDate]=useState(todayISO());
   const [histFilter,setHistFilter]=useState("all");
+  const [confirmDelete,setConfirmDelete]=useState(null);
+
   const [pin,setPin]=useState("");
   const [unlocked,setUnlocked]=useState(false);
   const [pinErr,setPinErr]=useState(false);
@@ -317,22 +321,38 @@ function App(){
   const [fechoObs,setFechoObs]=useState("");
   const [guestMode,setGuestMode]=useState(false);
 
+  const refreshPending=()=>setPendingCount(lsa(QK).length);
+
   const fetchData=useCallback(async()=>{
     try{
       const{data,error}=await db.from("abordagens").select("*").order("ts",{ascending:false});
       if(error)throw error;
-      const r=(data||[]).map(fromRow);
-      setRecs(r);lss(CK,r);setOnline(true);
+      const fromSupabase=(data||[]).map(fromRow);
+      // Mantém registos da queue que ainda não chegaram ao Supabase
+      const supabaseIds=new Set(fromSupabase.map(x=>String(x.id)));
+      const queued=lsa(QK).map(fromRow).filter(x=>!supabaseIds.has(String(x.id)));
+      const merged=[...queued,...fromSupabase].sort((a,b)=>b.ts.localeCompare(a.ts));
+      setRecs(merged);lss(CK,merged);setOnline(true);
+      // Flush oportunista da queue — usa insert com ignore on conflict para não precisar de UPDATE permission
+      const q=lsa(QK);
+      if(q.length){
+        db.from("abordagens").insert(q)
+          .then(({error:e})=>{
+            if(!e){lss(QK,[]);setPendingCount(0);}
+            // Se falhou por duplicate key (23505), remove os que já existem no Supabase
+            else if(e.code==="23505"){
+              const remaining=q.filter(x=>!supabaseIds.has(String(x.id)));
+              lss(QK,remaining);setPendingCount(remaining.length);
+            }
+          });
+      } else {
+        setPendingCount(0);
+      }
     }catch{setOnline(false);}
     finally{setLoading(false);}
   },[]);
 
-  useEffect(()=>{fetchData();const t=setInterval(fetchData,60000);return()=>clearInterval(t);},[fetchData]);
-  useEffect(()=>{
-    if(!online)return;
-    const q=lsa(QK);if(!q.length)return;
-    db.from("abordagens").upsert(q).then(({error})=>{if(!error){lss(QK,[]);fetchData();}});
-  },[online,fetchData]);
+  useEffect(()=>{fetchData();const t=setInterval(fetchData,30000);return()=>clearInterval(t);},[fetchData]);
 
   const reset=()=>{
     setStep(0);setAceitou(null);setTemContinente(null);setClienteNOS(null);setIC(null);
@@ -376,7 +396,7 @@ function App(){
     if(saving)return;
     setSaving(true);
     const r={
-      id:Date.now()*1000+Math.floor(Math.random()*1000),ts:localISO(),
+      id:Date.now(),ts:localISO(),
       colaborador:session.colaborador,quiosque:session.quiosque,
       horaEntrada:session.horaEntrada,horaSaida:session.horaSaida,
       aceitou,temContinente:aceitou?temContinente:null,clienteNOS:aceitou?clienteNOS:null,
@@ -388,10 +408,38 @@ function App(){
     else if(hasVenda)r.tipo="venda";
     else if(r.lead)r.tipo="lead";
     else r.tipo="sem_venda";
-    setRecs(p=>[r,...p]);setSyncing(true);
-    try{const{error}=await db.from("abordagens").upsert([toRow(r)],{onConflict:"id"});if(error)throw error;setOnline(true);}
-    catch{setOnline(false);const q=lsa(QK);q.push(toRow(r));lss(QK,q);}
-    finally{setSyncing(false);setSaving(false);setFlash(true);setTimeout(()=>{setFlash(false);reset();},1600);}
+    // Optimistic update imediato
+    setRecs(p=>[r,...p]);
+    setSyncing(true);
+    try{
+      // INSERT simples — registo novo com ID único, não precisa de upsert/update
+      const{error}=await db.from("abordagens").insert([toRow(r)]);
+      if(error)throw error;
+      setOnline(true);
+      // Sucesso — garante que não fica na queue
+      const q=lsa(QK).filter(x=>String(x.id)!==String(r.id));
+      lss(QK,q);setPendingCount(q.length);
+    }catch(e){
+      // Falhou — guarda na queue para retry automático no próximo fetchData
+      setOnline(false);
+      const q=lsa(QK);
+      if(!q.find(x=>String(x.id)===String(r.id))){q.push(toRow(r));lss(QK,q);}
+      setPendingCount(lsa(QK).length);
+    }
+    finally{
+      setSyncing(false);setSaving(false);
+      setFlash(true);setTimeout(()=>{setFlash(false);reset();},1600);
+    }
+  };
+
+  const deleteRecord=async(id)=>{
+    setRecs(p=>p.filter(r=>r.id!==id));
+    setConfirmDelete(null);
+    const q=lsa(QK).filter(r=>String(r.id)!==String(id));
+    lss(QK,q);setPendingCount(q.length);
+    try{
+      await db.from("abordagens").delete().eq("id",id);
+    }catch(e){console.error("Delete failed",e);}
   };
 
   const today=records.filter(r=>new Date(r.ts).toDateString()===todayStr());
@@ -456,7 +504,6 @@ function App(){
     </div>
   );
 
-  // ── LOGIN ─────────────────────────────────────────────────────────────────
   if(!session&&!guestMode)return(
     <div className="min-h-screen flex flex-col" style={{background:"linear-gradient(160deg,#0a0a0a 0%,#1a1a2e 60%,#0f2027 100%)"}}>
       <div className="flex-1 flex flex-col items-center justify-center p-5 gap-7">
@@ -521,7 +568,6 @@ function App(){
     </div>
   );
 
-  // ── RELATÓRIO ─────────────────────────────────────────────────────────────
   if(showReport)return(
     <div className="min-h-screen bg-gray-100 fadeUp">
       <div className="px-5 pt-12 pb-5 bg-white border-b border-gray-100">
@@ -588,7 +634,6 @@ function App(){
     </div>
   );
 
-  // ── MAIN APP ──────────────────────────────────────────────────────────────
   return(
     <div className="min-h-screen bg-gray-100">
       {showFechoConfirm&&(
@@ -617,7 +662,9 @@ function App(){
               <div>
                 <div className="flex items-center gap-1.5">
                   <p className="font-bold text-gray-900 text-xs">{session.quiosque.replace("Quiosque ","")}</p>
-                  <div className={`w-1.5 h-1.5 rounded-full ${syncing?"bg-amber-400":online?"bg-emerald-500":"bg-red-400"}`}/>
+                  {/* Bolinha: verde=ok, amarelo=a guardar, vermelho=sem ligação */}
+                  <div className={`w-1.5 h-1.5 rounded-full ${syncing?"bg-amber-400":online?"bg-emerald-500":"bg-red-400"}`}
+                       title={syncing?"A guardar...":online?"Ligado":"Sem ligação — a guardar localmente"}/>
                 </div>
                 <p className="text-[10px] text-gray-400 font-medium">{session.colaborador} · {session.horaEntrada}–{session.horaSaida}</p>
               </div>
@@ -648,16 +695,14 @@ function App(){
 
       <div className="p-4 max-w-md mx-auto safe-bottom space-y-3" key={tab}>
 
-        {/* ── REGISTO ── */}
         {tab==="novo"&&session&&(
           <div className="space-y-3 fadeUp">
-            <LiveViewBar abordagens={myS.total} vendas={myTotV} leads={myS.leads} taxa={txConv}/>
+            <LiveViewBar abordagens={myS.total} vendas={myTotV} leads={myS.leads} taxa={txConv} pending={pendingCount}/>
             <Card className="p-5">
               <div className="flex gap-1.5 mb-6">
                 {steps.map((_,i)=><div key={i} className={`h-1 flex-1 rounded-full transition-all ${i<=step?"bg-gray-900":"bg-gray-100"}`}/>)}
               </div>
 
-              {/* Passo 1 */}
               {sn==="aceitou"&&<div className="pop space-y-2">
                 <p className="text-xl font-black text-gray-900 mb-1">Abordagem</p>
                 <p className="text-sm text-gray-400 font-medium mb-5">O cliente aceitou ouvir?</p>
@@ -665,11 +710,8 @@ function App(){
                 <RadioCard label="Não, recusou" selected={aceitou===false} onClick={()=>setAceitou(false)} selColor="red"/>
               </div>}
 
-              {/* Passo 2 — Perfil */}
               {sn==="perfil"&&<div className="pop space-y-5">
                 <p className="text-xl font-black text-gray-900">Perfil do cliente</p>
-
-                {/* Cartão Continente */}
                 <div>
                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Cartão Continente?</p>
                   <div className="flex gap-2">
@@ -681,8 +723,6 @@ function App(){
                         ${temContinente===false?"border-red-400 bg-red-50 text-red-600":"border-gray-100 bg-gray-50 text-gray-500"}`}>Não</button>
                   </div>
                 </div>
-
-                {/* Cliente NOS */}
                 <div>
                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">É cliente NOS?</p>
                   <div className="flex gap-2">
@@ -694,8 +734,6 @@ function App(){
                         ${clienteNOS===false?"border-red-400 bg-red-50 text-red-600":"border-gray-100 bg-gray-50 text-gray-500"}`}>Não</button>
                   </div>
                 </div>
-
-                {/* Perfil Combina */}
                 {temContinente===true&&(
                   <div className="pop">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Perfil Combina</p>
@@ -709,7 +747,6 @@ function App(){
                 )}
               </div>}
 
-              {/* Passo 3 — Vendas */}
               {sn==="vendas"&&<div className="pop space-y-2">
                 <p className="text-xl font-black text-gray-900 mb-1">Resultado</p>
                 <p className="text-sm text-gray-400 font-medium mb-4">O que foi vendido?</p>
@@ -770,12 +807,11 @@ function App(){
           </div>
         )}
 
-        {/* ── HISTÓRICO ── */}
         {tab==="hist"&&session&&(
           <div className="space-y-3 fadeUp">
             <Card className="p-5">
               <SLabel>Dia</SLabel>
-              <input type="date" value={histDate} onChange={e=>setHistDate(e.target.value)}
+              <input type="date" value={histDate} onChange={e=>{setHistDate(e.target.value);setConfirmDelete(null);}}
                 className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3.5 text-sm font-medium focus:outline-none focus:border-gray-300 transition-all"/>
             </Card>
             <div className="flex gap-2 overflow-x-auto -mx-1 px-1 pb-1">
@@ -786,7 +822,7 @@ function App(){
               ))}
             </div>
             {(()=>{
-              const dayR=records.filter(r=>isoDay(r.ts)===histDate);
+              const dayR=records.filter(r=>isoDay(r.ts)===histDate&&r.quiosque===session.quiosque);
               const filtered=histFilter==="all"?dayR:histFilter==="lead"?dayR.filter(r=>r.lead):dayR.filter(r=>r.tipo===histFilter);
               const ds=stats(dayR);
               return(<>
@@ -805,32 +841,56 @@ function App(){
                   :filtered.map(r=>{
                     const cfg=TIPO_CFG[r.tipo]||TIPO_CFG.sem_venda;
                     const combinaLabel=r.isCombina===0?"Sem Combina":r.isCombina?`C${r.isCombina}`:null;
+                    const isConfirming=confirmDelete===r.id;
                     return(
-                      <div key={r.id} className={`rounded-3xl border-2 p-4 ${cfg.bg} ${cfg.border}`}>
+                      <div key={r.id} className={`rounded-3xl border-2 p-4 transition-all ${isConfirming?"border-red-300 bg-red-50":`${cfg.bg} ${cfg.border}`}`}>
                         <div className="flex items-start justify-between mb-2">
                           <div className="flex flex-wrap gap-1.5 flex-1">
-                            <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${cfg.badge}`}>{cfg.label}</span>
-                            {r.lead&&r.tipo==="venda"&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">+ Lead</span>}
-                            {r.temContinente===false&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-600">Sem CC</span>}
-                            {combinaLabel&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">{combinaLabel}</span>}
-                            {r.clienteNOS===false&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-100 text-orange-600">Não NOS</span>}
-                            {r.vendas?.combina&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700">Combina</span>}
-                            {r.vendas?.energia&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-100 text-orange-700">Energia</span>}
-                            {r.vendas?.novoCliente&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">Novo NOS</span>}
-                            {r.vendas?.alarme&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-gray-200 text-gray-700">Alarme</span>}
-                            {r.vendas?.outros&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">Outros{r.vendas.outrosDesc?`: ${r.vendas.outrosDesc}`:""}</span>}
+                            {!isConfirming&&<>
+                              <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${cfg.badge}`}>{cfg.label}</span>
+                              {r.lead&&r.tipo==="venda"&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">+ Lead</span>}
+                              {r.temContinente===false&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-600">Sem CC</span>}
+                              {combinaLabel&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">{combinaLabel}</span>}
+                              {r.clienteNOS===false&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-100 text-orange-600">Não NOS</span>}
+                              {r.vendas?.combina&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700">Combina</span>}
+                              {r.vendas?.energia&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-100 text-orange-700">Energia</span>}
+                              {r.vendas?.novoCliente&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">Novo NOS</span>}
+                              {r.vendas?.alarme&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-gray-200 text-gray-700">Alarme</span>}
+                              {r.vendas?.outros&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">Outros{r.vendas.outrosDesc?`: ${r.vendas.outrosDesc}`:""}</span>}
+                            </>}
+                            {isConfirming&&<p className="text-sm font-bold text-red-600">Eliminar este registo?</p>}
                           </div>
                           <div className="text-right shrink-0 ml-3">
                             <p className="text-[11px] text-gray-500 font-bold">{fmtTime(r.ts)}</p>
                             <p className="text-[10px] text-gray-400 font-medium">{r.colaborador}</p>
                           </div>
                         </div>
-                        {r.lead&&(
+                        {r.lead&&!isConfirming&&(
                           <div className="bg-white bg-opacity-70 rounded-xl p-3 mt-1.5">
                             <p className="text-xs font-bold text-blue-700">{r.lead.nome}{r.lead.tel?` · ${r.lead.tel}`:""}</p>
                             {r.lead.obs&&<p className="text-xs text-gray-400 mt-0.5">{r.lead.obs}</p>}
                           </div>
                         )}
+                        <div className="flex justify-end gap-2 mt-3">
+                          {isConfirming?(
+                            <>
+                              <button onClick={()=>setConfirmDelete(null)}
+                                className="px-4 py-2 rounded-xl border-2 border-gray-200 text-gray-500 font-bold text-xs active:scale-95 transition-all">
+                                Cancelar
+                              </button>
+                              <button onClick={()=>deleteRecord(r.id)}
+                                className="px-4 py-2 rounded-xl bg-red-500 text-white font-bold text-xs active:scale-95 transition-all">
+                                Sim, eliminar
+                              </button>
+                            </>
+                          ):(
+                            <button onClick={()=>setConfirmDelete(r.id)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-red-100 bg-red-50 text-red-400 font-bold text-[11px] active:scale-95 transition-all">
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                              Eliminar
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })
@@ -840,7 +900,6 @@ function App(){
           </div>
         )}
 
-        {/* ── DASHBOARD ── */}
         {tab==="dash"&&(
           <div className="fadeUp">
             {!unlocked?(
