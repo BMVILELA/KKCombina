@@ -2,8 +2,8 @@
 <html lang="pt">
 <head>
   <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
-  <title>Quiosque Combina v16</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover"/>
+  <title>Quiosque Combina v22</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
@@ -15,6 +15,7 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
+    :root{--safe-bottom:env(safe-area-inset-bottom,0px);}
     *{-webkit-tap-highlight-color:transparent;box-sizing:border-box}
     html,body{height:100%;overflow-x:hidden;margin:0}
     body{background:#F0F0F5;font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif}
@@ -28,6 +29,7 @@
     @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
     .slideUp{animation:slideUp .3s cubic-bezier(.4,0,.2,1)}
     ::-webkit-scrollbar{display:none}
+    .safe-bottom{padding-bottom:calc(2.5rem + var(--safe-bottom));}
   </style>
 </head>
 <body>
@@ -40,57 +42,63 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const DASHBOARD_PIN = "NOS26";
 const QUIOSQUES = ["Quiosque Cascais","Quiosque Montijo","Quiosque Norteshopping"];
 const TURNOS = [
-  {id:"manha",  label:"Manhã",       sub:"11:00 – 16:00", entrada:"11:00", saida:"16:00"},
-  {id:"tarde",  label:"Tarde",       sub:"16:00 – 20:00", entrada:"16:00", saida:"20:00"},
-  {id:"full",   label:"Completo",    sub:"11:00 – 20:00", entrada:"11:00", saida:"20:00"},
-  {id:"custom", label:"Personalizado",sub:"Definir horas", entrada:"",     saida:""},
+  {id:"manha",  label:"Manhã",        sub:"11:00 – 16:00", entrada:"11:00", saida:"16:00"},
+  {id:"tarde",  label:"Tarde",        sub:"16:00 – 20:00", entrada:"16:00", saida:"20:00"},
+  {id:"full",   label:"Completo",     sub:"11:00 – 20:00", entrada:"11:00", saida:"20:00"},
+  {id:"custom", label:"Personalizado",sub:"Definir horas",  entrada:"",     saida:""},
 ];
 
 const {createClient} = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
-const SK="combina_sess_v11",CK="combina_cache_v11",QK="combina_queue_v11";
+const SK="combina_sess_v22",CK="combina_cache_v22",QK="combina_queue_v22";
 const ls=k=>{try{return JSON.parse(localStorage.getItem(k)||"null")}catch{return null}};
 const lsa=k=>{try{return JSON.parse(localStorage.getItem(k)||"[]")}catch{return[]}};
 const lss=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+
 const todayStr=()=>new Date().toDateString();
-// Data LOCAL do browser — resolve fuso UTC vs Portugal
 const todayISO=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
 const localISO=()=>{const d=new Date(),p=n=>String(n).padStart(2,"0");return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.000`;};
 const fmtDate=iso=>new Date(iso.length<=10?iso+"T12:00:00":iso).toLocaleDateString("pt-PT");
 const fmtTime=iso=>{const d=new Date(iso.length<=10?iso+"T12:00:00":iso);return`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;};
 const isoDay=iso=>iso.slice(0,10);
 
-const vendasPorCombina=ic=>{
-  if(ic===false)return[["combina","Ativar Combina"],["energia","Energia Galp"],["novoCliente","Novo Cliente NOS"],["alarme","Alarme"]];
-  if(ic===1)return[["energia","Energia Galp"],["alarme","Alarme"]];
-  if(ic===2)return[["alarme","Alarme"]];
-  if(ic===3)return[["alarme","Alarme"]];
+// Ação proposta por perfil
+const getAcaoProposta=(temContinente,clienteNOS,isCombina)=>{
+  if(!temContinente&&!clienteNOS)                     return["energia","novoCliente","combina"];
+  if(!temContinente&&clienteNOS)                      return["energia"];
+  if(temContinente&&isCombina===0&&!clienteNOS)       return["combina","novoCliente","energia"];
+  if(temContinente&&isCombina===0&&clienteNOS)        return["combina","energia"];
+  if(temContinente&&isCombina>0)                      return["energia"];
   return[];
 };
 
 const TIPO_CFG={
-  venda:{label:"Com Venda",bg:"bg-emerald-50",border:"border-emerald-200",badge:"bg-emerald-500 text-white"},
-  lead:{label:"Lead",bg:"bg-blue-50",border:"border-blue-200",badge:"bg-blue-500 text-white"},
-  sem_venda:{label:"Sem Resultado",bg:"bg-amber-50",border:"border-amber-200",badge:"bg-amber-400 text-white"},
-  recusa:{label:"Recusa",bg:"bg-red-50",border:"border-red-200",badge:"bg-red-400 text-white"},
+  venda:    {label:"Com Venda",     bg:"bg-emerald-50",border:"border-emerald-200",badge:"bg-emerald-500 text-white"},
+  lead:     {label:"Lead",          bg:"bg-blue-50",   border:"border-blue-200",   badge:"bg-blue-500 text-white"},
+  sem_venda:{label:"Sem Resultado", bg:"bg-amber-50",  border:"border-amber-200",  badge:"bg-amber-400 text-white"},
+  recusa:   {label:"Recusa",        bg:"bg-red-50",    border:"border-red-200",    badge:"bg-red-400 text-white"},
 };
 
 const toRow=r=>({
   id:r.id,ts:r.ts,colaborador:r.colaborador||"",quiosque:r.quiosque||"",
   hora_entrada:r.horaEntrada||"",hora_saida:r.horaSaida||"",aceitou:!!r.aceitou,
-  is_combina:r.isCombina==null?null:r.isCombina===false?0:Number(r.isCombina),
+  tem_continente:r.temContinente==null?null:!!r.temContinente,
+  cliente_nos:r.clienteNOS==null?null:!!r.clienteNOS,
+  is_combina:r.isCombina==null?null:Number(r.isCombina),
   vendeu_combina:!!(r.vendas?.combina),venda_energia:!!(r.vendas?.energia),
   venda_novo_cliente:!!(r.vendas?.novoCliente),venda_alarme:!!(r.vendas?.alarme),
+  venda_outros:!!(r.vendas?.outros),venda_outros_desc:r.vendas?.outrosDesc||null,
   tem_lead:!!r.lead,lead_nome:r.lead?.nome||null,lead_tel:r.lead?.tel||null,lead_obs:r.lead?.obs||null,
 });
 
 const fromRow=row=>{
-  const tv=row.vendeu_combina||row.venda_energia||row.venda_novo_cliente||row.venda_alarme;
+  const tv=row.vendeu_combina||row.venda_energia||row.venda_novo_cliente||row.venda_alarme||row.venda_outros;
   return{
     id:row.id,ts:row.ts,colaborador:row.colaborador,quiosque:row.quiosque,
     horaEntrada:row.hora_entrada,horaSaida:row.hora_saida,aceitou:row.aceitou,
-    isCombina:row.is_combina==null?null:row.is_combina===0?false:row.is_combina,
-    vendas:{combina:row.vendeu_combina,energia:row.venda_energia,novoCliente:row.venda_novo_cliente,alarme:row.venda_alarme},
+    temContinente:row.tem_continente,clienteNOS:row.cliente_nos,isCombina:row.is_combina,
+    vendas:{combina:row.vendeu_combina,energia:row.venda_energia,novoCliente:row.venda_novo_cliente,
+            alarme:row.venda_alarme,outros:row.venda_outros,outrosDesc:row.venda_outros_desc},
     lead:row.tem_lead?{nome:row.lead_nome,tel:row.lead_tel,obs:row.lead_obs}:null,
     tipo:!row.aceitou?"recusa":tv?"venda":row.tem_lead?"lead":"sem_venda",
   };
@@ -104,60 +112,49 @@ const stats=arr=>({
   energia:arr.filter(r=>r.vendas?.energia).length,
   novoCliente:arr.filter(r=>r.vendas?.novoCliente).length,
   alarme:arr.filter(r=>r.vendas?.alarme).length,
-  // FIX P5: conta TODOS os registos com lead, independentemente do tipo (venda ou lead)
+  outros:arr.filter(r=>r.vendas?.outros).length,
   leads:arr.filter(r=>r.lead).length,
   vendas:arr.filter(r=>r.tipo==="venda").length,
-  c0:arr.filter(r=>r.isCombina===false).length,
+  c0:arr.filter(r=>r.temContinente&&r.isCombina===0).length,
   c1:arr.filter(r=>r.isCombina===1).length,
   c2:arr.filter(r=>r.isCombina===2).length,
   c3:arr.filter(r=>r.isCombina===3).length,
+  comCC:arr.filter(r=>r.aceitou&&r.temContinente===true).length,
+  semCC:arr.filter(r=>r.aceitou&&r.temContinente===false).length,
 });
 
-// ── Export XLS – P3: parâmetro opcional shiftObs ──────────────────────────────
 const exportXLS=(data,filename,shiftObs="")=>{
-  if(!data.length){alert("Sem dados.");return}
+  if(!data.length){alert("Sem dados.");return;}
   const rows=data.map(r=>({
-    "Data":fmtDate(r.ts),
-    "Hora":fmtTime(r.ts),
-    "Quiosque":r.quiosque||"",
-    "Colaborador":r.colaborador||"",
-    "Entrada":r.horaEntrada||"",
-    "Saída":r.horaSaida||"",
-    "Aceitou":r.aceitou?"Sim":"Não",
-    "Perfil Combina":r.isCombina===false?"Sem Combina":r.isCombina?`Combina ${r.isCombina}`:"",
-    "Venda Combina":r.vendas?.combina?"Sim":"Não",
-    "Venda Energia":r.vendas?.energia?"Sim":"Não",
-    "Venda Novo NOS":r.vendas?.novoCliente?"Sim":"Não",
-    "Venda Alarme":r.vendas?.alarme?"Sim":"Não",
-    "Lead":r.lead?"Sim":"Não",
-    "Lead Nome":r.lead?.nome||"",
-    "Lead Telefone":r.lead?.tel||"",
-    "Lead Obs":r.lead?.obs||"",
+    "Data":fmtDate(r.ts),"Hora":fmtTime(r.ts),"Quiosque":r.quiosque||"","Colaborador":r.colaborador||"",
+    "Entrada":r.horaEntrada||"","Saída":r.horaSaida||"","Aceitou":r.aceitou?"Sim":"Não",
+    "Tem Cartão Continente":r.temContinente==null?"":r.temContinente?"Sim":"Não",
+    "É cliente NOS":r.clienteNOS==null?"":r.clienteNOS?"Sim":"Não",
+    "Perfil Combina":r.isCombina==null?"":r.isCombina===0?"Sem Combina":`Combina ${r.isCombina}`,
+    "Venda Combina":r.vendas?.combina?"Sim":"Não","Venda Energia":r.vendas?.energia?"Sim":"Não",
+    "Venda Novo NOS":r.vendas?.novoCliente?"Sim":"Não","Venda Alarme":r.vendas?.alarme?"Sim":"Não",
+    "Venda Outros":r.vendas?.outros?"Sim":"Não","Outros - Descrição":r.vendas?.outrosDesc||"",
+    "Lead":r.lead?"Sim":"Não","Lead Nome":r.lead?.nome||"","Lead Telefone":r.lead?.tel||"","Lead Obs":r.lead?.obs||"",
     "Tipo":r.tipo||"",
     ...(shiftObs?{"Obs. Turno":shiftObs}:{}),
   }));
   const ws=XLSX.utils.json_to_sheet(rows);
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,"Registos");
-  ws["!cols"]=[
-    {wch:12},{wch:8},{wch:22},{wch:20},{wch:8},{wch:8},{wch:8},
-    {wch:16},{wch:14},{wch:14},{wch:14},{wch:14},{wch:6},{wch:20},
-    {wch:16},{wch:24},{wch:10},
-    ...(shiftObs?[{wch:35}]:[]),
-  ];
+  ws["!cols"]=[{wch:12},{wch:8},{wch:22},{wch:20},{wch:8},{wch:8},{wch:8},{wch:18},{wch:16},{wch:16},{wch:14},{wch:14},{wch:14},{wch:14},{wch:12},{wch:28},{wch:6},{wch:20},{wch:16},{wch:24},{wch:10}];
   XLSX.writeFile(wb,filename);
 };
 
-// ── UI Components ──────────────────────────────────────────────────────────────
+// ── UI Components ─────────────────────────────────────────────────────────────
 const Logo=({size="sm",dark=false})=>{
   const lg=size==="lg";
-  const borderColor=dark?"border-white border-opacity-30":"border-black";
-  const bgColor=dark?"bg-white bg-opacity-10":"bg-white";
+  const bc=dark?"border-white border-opacity-30":"border-black";
+  const bg=dark?"bg-white bg-opacity-10":"bg-white";
   return(
     <div className={`flex flex-col items-center ${lg?"gap-2":"gap-1"}`}>
       <div className={`flex ${lg?"gap-2":"gap-1"}`}>
         {["COM","BI","NA"].map(t=>(
-          <div key={t} className={`border-2 ${borderColor} ${bgColor} rounded-xl ${lg?"px-4 py-2":"px-2 py-1"}`}>
+          <div key={t} className={`border-2 ${bc} ${bg} rounded-xl ${lg?"px-4 py-2":"px-2 py-1"}`}>
             <span className={`font-black leading-none block ${dark?"text-white":"text-black"} ${lg?"text-2xl":"text-[10px]"}`}>{t}</span>
           </div>
         ))}
@@ -190,37 +187,57 @@ const ProgressBar=({value,max,color="bg-gray-900"})=>(
     <div className={`h-full ${color} rounded-full`} style={{width:max?`${Math.min(100,Math.round(value/max*100))}%`:"0%",transition:"width .6s"}}/>
   </div>
 );
-const RadioCard=({label,desc,selected,onClick,accentColor=""})=>(
-  <button onClick={onClick}
-    className={`w-full py-4 px-4 rounded-2xl border-2 text-left transition-all active:scale-[.98] flex items-center justify-between
-      ${selected?accentColor||"border-gray-900 bg-gray-50":"border-gray-100 bg-gray-50"}`}>
-    <div>
-      <p className={`font-bold text-sm ${selected?"text-gray-900":"text-gray-600"}`}>{label}</p>
-      {desc&&<p className="text-xs text-gray-400 mt-0.5 font-medium">{desc}</p>}
-    </div>
-    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ml-3 transition-all ${selected?"border-gray-900 bg-gray-900":"border-gray-300"}`}>
-      {selected&&<div className="w-2 h-2 rounded-full bg-white"/>}
-    </div>
-  </button>
+
+// RadioCard — cor configurável: "green" (padrão) | "amber" | "red"
+const RadioCard=({label,selected,onClick,selColor="green"})=>{
+  const colors={
+    green:{border:"border-emerald-500",bg:"bg-emerald-50",text:"text-emerald-800",dot:"border-emerald-500 bg-emerald-500"},
+    amber:{border:"border-amber-400",  bg:"bg-amber-50",  text:"text-amber-800",  dot:"border-amber-400 bg-amber-400"},
+    red:  {border:"border-red-400",    bg:"bg-red-50",    text:"text-red-700",    dot:"border-red-400 bg-red-400"},
+  };
+  const s=colors[selColor]||colors.green;
+  return(
+    <button onClick={onClick}
+      className={`w-full py-4 px-4 rounded-2xl border-2 text-left transition-all active:scale-[.98] flex items-center justify-between
+        ${selected?`${s.border} ${s.bg}`:"border-gray-100 bg-gray-50"}`}>
+      <p className={`font-bold text-sm ${selected?s.text:"text-gray-600"}`}>{label}</p>
+      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ml-3 transition-all
+        ${selected?s.dot:"border-gray-300"}`}>
+        {selected&&<div className="w-2 h-2 rounded-full bg-white"/>}
+      </div>
+    </button>
+  );
+};
+
+// CheckCard — banner "⭐ Ação Proposta" muito fino e discreto
+const CheckCard=({label,checked,onClick,acaoProposta=false})=>(
+  <div className={`rounded-2xl overflow-hidden border-2 transition-all
+    ${checked?"border-emerald-500":acaoProposta?"border-amber-300":"border-gray-100"}`}>
+    {/* [FIX 3] Banner mínimo — só uma linha fina com texto micro */}
+    {acaoProposta&&(
+      <div className="flex items-center gap-1.5 px-3 py-[3px]"
+        style={{background:"linear-gradient(90deg,#fbbf24 0%,#fde68a 100%)"}}>
+        <span className="text-[8px] font-black uppercase tracking-[0.15em] text-amber-900 opacity-80">⭐ ação proposta</span>
+      </div>
+    )}
+    <button onClick={onClick}
+      className={`w-full py-4 px-4 text-left flex items-center justify-between transition-all active:scale-[.98]
+        ${checked?"bg-emerald-50":acaoProposta?"bg-amber-50":"bg-gray-50"}`}>
+      <span className={`font-bold text-sm ${checked?"text-emerald-700":acaoProposta?"text-gray-900":"text-gray-600"}`}>{label}</span>
+      <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 ml-3 transition-all
+        ${checked?"border-emerald-500 bg-emerald-500":acaoProposta?"border-amber-300":"border-gray-300"}`}>
+        {checked&&<svg width="12" height="9" viewBox="0 0 12 9" fill="none"><path d="M1 4.5L4.5 8L11 1" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+      </div>
+    </button>
+  </div>
 );
-const CheckCard=({label,checked,onClick})=>(
-  <button onClick={onClick}
-    className={`w-full py-4 px-4 rounded-2xl border-2 text-left transition-all active:scale-[.98] flex items-center justify-between
-      ${checked?"border-emerald-500 bg-emerald-50":"border-gray-100 bg-gray-50"}`}>
-    <span className={`font-bold text-sm ${checked?"text-emerald-700":"text-gray-600"}`}>{label}</span>
-    <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${checked?"border-emerald-500 bg-emerald-500":"border-gray-300"}`}>
-      {checked&&<svg width="12" height="9" viewBox="0 0 12 9" fill="none"><path d="M1 4.5L4.5 8L11 1" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-    </div>
-  </button>
-);
+
 const Toggle=({active,onClick})=>(
   <button onClick={onClick} style={{width:"52px",height:"28px"}}
     className={`rounded-full transition-all duration-300 relative flex-shrink-0 ${active?"bg-blue-500":"bg-gray-200"}`}>
     <div className={`w-5 h-5 bg-white rounded-full shadow-md absolute top-1.5 transition-all duration-300 ${active?"left-[28px]":"left-1.5"}`}/>
   </button>
 );
-
-// ─── KPI Cards ──────────────────────────────────────────────────────────────────
 const KPIAbordagens=({total,conversas,recusas})=>(
   <div className="bg-white rounded-3xl p-5 shadow-sm">
     <SLabel>Abordagens</SLabel>
@@ -242,36 +259,24 @@ const KPILeads=({total})=>(
     <p className="text-xs font-medium mt-1" style={{color:"#2563eb"}}>para follow-up</p>
   </div>
 );
-
-// ─── P4: Live View Bar ──────────────────────────────────────────────────────────
 const LiveViewBar=({abordagens,vendas,leads,taxa})=>(
   <div className="bg-white rounded-3xl shadow-sm px-3 py-3">
     <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400 mb-2 px-1">📊 Ponto de Situação</p>
     <div className="flex">
-      <div className="flex-1 text-center py-1">
-        <p className="text-[26px] font-black text-gray-900 leading-tight">{abordagens}</p>
-        <p className="text-[10px] text-gray-400 font-bold mt-0.5">Abord.</p>
-      </div>
-      <div className="w-px bg-gray-100"/>
-      <div className="flex-1 text-center py-1">
-        <p className="text-[26px] font-black leading-tight" style={{color:"#059669"}}>{vendas}</p>
-        <p className="text-[10px] text-gray-400 font-bold mt-0.5">Vendas</p>
-      </div>
-      <div className="w-px bg-gray-100"/>
-      <div className="flex-1 text-center py-1">
-        <p className="text-[26px] font-black leading-tight" style={{color:"#2563eb"}}>{leads}</p>
-        <p className="text-[10px] text-gray-400 font-bold mt-0.5">Leads</p>
-      </div>
-      <div className="w-px bg-gray-100"/>
-      <div className="flex-1 text-center py-1">
-        <p className="text-[26px] font-black text-gray-900 leading-tight">{taxa}%</p>
-        <p className="text-[10px] text-gray-400 font-bold mt-0.5">Conv.</p>
-      </div>
+      {[[abordagens,"Abord.","#1f2937"],[vendas,"Vendas","#059669"],[leads,"Leads","#2563eb"],[`${taxa}%`,"Conv.","#1f2937"]].map(([v,l,c],i)=>(
+        <React.Fragment key={l}>
+          {i>0&&<div className="w-px bg-gray-100"/>}
+          <div className="flex-1 text-center py-1">
+            <p className="text-[26px] font-black leading-tight" style={{color:c}}>{v}</p>
+            <p className="text-[10px] text-gray-400 font-bold mt-0.5">{l}</p>
+          </div>
+        </React.Fragment>
+      ))}
     </div>
   </div>
 );
 
-// ─── APP ────────────────────────────────────────────────────────────────────────
+// ── APP ───────────────────────────────────────────────────────────────────────
 function App(){
   const [tab,setTab]=useState("novo");
   const [records,setRecs]=useState(()=>lsa(CK));
@@ -280,26 +285,23 @@ function App(){
   const [online,setOnline]=useState(true);
   const [session,setSession]=useState(()=>ls(SK));
 
-  // Login
-  const [lNome,setLNome]=useState("");
+  const [lUser,setLUser]=useState("");
   const [lQ,setLQ]=useState("");
   const [lTurno,setLTurno]=useState(null);
   const [lCustomIn,setLCustomIn]=useState("");
   const [lCustomOut,setLCustomOut]=useState("");
 
-  // Wizard
   const [step,setStep]=useState(0);
   const [aceitou,setAceitou]=useState(null);
+  const [temContinente,setTemContinente]=useState(null);
+  const [clienteNOS,setClienteNOS]=useState(null);
   const [isCombina,setIC]=useState(null);
-  const [vendas,setVendas]=useState({combina:false,energia:false,novoCliente:false,alarme:false});
+  const [vendas,setVendas]=useState({combina:false,energia:false,novoCliente:false,alarme:false,outros:false,outrosDesc:""});
   const [lead,setLead]=useState({active:false,nome:"",tel:"",obs:""});
   const [flash,setFlash]=useState(false);
 
-  // Histórico
   const [histDate,setHistDate]=useState(todayISO());
   const [histFilter,setHistFilter]=useState("all");
-
-  // Dashboard
   const [pin,setPin]=useState("");
   const [unlocked,setUnlocked]=useState(false);
   const [pinErr,setPinErr]=useState(false);
@@ -307,25 +309,20 @@ function App(){
   const [dashFrom,setDashFrom]=useState(todayISO());
   const [dashTo,setDashTo]=useState(todayISO());
 
-  // Report
   const [showReport,setShowReport]=useState(false);
   const [reportCopied,setReportCopied]=useState(false);
   const [imgGenerating,setImgGenerating]=useState(false);
-  const [lastSync,setLastSync]=useState(null);
-
-  // P2: Modo gestor (dashboard sem login de turno)
-  const [guestMode,setGuestMode]=useState(false);
-
-  // P3: Fecho de turno com confirmação + observações
+  const [imgCopied,setImgCopied]=useState(false);
   const [showFechoConfirm,setShowFechoConfirm]=useState(false);
   const [fechoObs,setFechoObs]=useState("");
+  const [guestMode,setGuestMode]=useState(false);
 
   const fetchData=useCallback(async()=>{
     try{
       const{data,error}=await db.from("abordagens").select("*").order("ts",{ascending:false});
       if(error)throw error;
       const r=(data||[]).map(fromRow);
-      setRecs(r);lss(CK,r);setOnline(true);setLastSync(new Date());
+      setRecs(r);lss(CK,r);setOnline(true);
     }catch{setOnline(false);}
     finally{setLoading(false);}
   },[]);
@@ -338,8 +335,8 @@ function App(){
   },[online,fetchData]);
 
   const reset=()=>{
-    setStep(0);setAceitou(null);setIC(null);
-    setVendas({combina:false,energia:false,novoCliente:false,alarme:false});
+    setStep(0);setAceitou(null);setTemContinente(null);setClienteNOS(null);setIC(null);
+    setVendas({combina:false,energia:false,novoCliente:false,alarme:false,outros:false,outrosDesc:""});
     setLead({active:false,nome:"",tel:"",obs:""});
   };
   const getHorario=()=>{
@@ -350,35 +347,38 @@ function App(){
   };
   const doLogin=()=>{
     const h=getHorario();
-    const s={colaborador:lNome,quiosque:lQ,horaEntrada:h.entrada,horaSaida:h.saida,loginTs:localISO()};
+    const s={colaborador:lUser,quiosque:lQ,horaEntrada:h.entrada,horaSaida:h.saida,loginTs:localISO()};
     setSession(s);lss(SK,s);
   };
-  const doLogout=()=>{
-    localStorage.removeItem(SK);
-    setSession(null);setShowReport(false);
-    setFechoObs("");setGuestMode(false);
-    reset();
-  };
+  const doLogout=()=>{localStorage.removeItem(SK);setSession(null);setShowReport(false);setFechoObs("");setGuestMode(false);reset();};
+  const doFechoTurno=()=>{setShowFechoConfirm(false);setShowReport(true);};
 
-  // P3: Confirmar fecho de turno
-  const doFechoTurno=()=>{
-    setShowFechoConfirm(false);
-    setShowReport(true);
-  };
-
-  const hasVenda=Object.values(vendas).some(Boolean);
-  const steps=aceitou===false?["aceitou"]:(aceitou===true?["aceitou","combina","vendas"]:["aceitou"]);
+  const steps=aceitou===false?["aceitou"]:["aceitou","perfil","vendas"];
   const sn=steps[step];
   const isFinal=(sn==="aceitou"&&aceitou===false)||(sn==="vendas");
-  const canNext={aceitou:aceitou!==null,combina:isCombina!==null,vendas:true}[sn]??false;
-  const canLogin=lNome.trim()&&lQ&&lTurno&&(lTurno!=="custom"||(lCustomIn&&lCustomOut));
+
+  const canNext=(()=>{
+    if(sn==="aceitou") return aceitou!==null;
+    if(sn==="perfil"){
+      if(temContinente===null||clienteNOS===null) return false;
+      if(temContinente===true&&isCombina===null)  return false;
+      return true;
+    }
+    if(sn==="vendas") return true;
+    return false;
+  })();
+
+  const acaoProposta=aceitou?getAcaoProposta(temContinente,clienteNOS,isCombina):[];
+  const hasVenda=vendas.combina||vendas.energia||vendas.novoCliente||vendas.alarme||vendas.outros;
+  const canLogin=lUser.trim()&&lQ&&lTurno&&(lTurno!=="custom"||(lCustomIn&&lCustomOut));
 
   const saveRecord=async()=>{
     const r={
       id:Date.now(),ts:localISO(),
       colaborador:session.colaborador,quiosque:session.quiosque,
       horaEntrada:session.horaEntrada,horaSaida:session.horaSaida,
-      aceitou,isCombina:aceitou?isCombina:null,
+      aceitou,temContinente:aceitou?temContinente:null,clienteNOS:aceitou?clienteNOS:null,
+      isCombina:aceitou&&temContinente?isCombina:null,
       vendas:aceitou?vendas:null,
       lead:lead.active?{nome:lead.nome||"—",tel:lead.tel,obs:lead.obs}:null,
     };
@@ -393,10 +393,9 @@ function App(){
   };
 
   const today=records.filter(r=>new Date(r.ts).toDateString()===todayStr());
-  // myT: apenas registos do turno atual (desde loginTs) → reset automático ao fechar turno
   const myT=session?records.filter(r=>r.colaborador===session.colaborador&&r.quiosque===session.quiosque&&r.ts>=session.loginTs):[];
   const myS=stats(myT);
-  const myTotV=myS.combina+myS.energia+myS.novoCliente+myS.alarme;
+  const myTotV=myS.combina+myS.energia+myS.novoCliente+myS.alarme+myS.outros;
   const txConv=myS.conversas>0?Math.round(myTotV/myS.conversas*100):0;
   const dtag=new Date().toLocaleDateString("pt-PT").replace(/\//g,"-");
 
@@ -408,10 +407,8 @@ function App(){
   const getExportFilename=()=>dashFrom===dashTo?`Combina_${dashFrom}.xlsx`:`Combina_${dashFrom}_a_${dashTo}.xlsx`;
 
   const buildReport=()=>[
-    `RELATÓRIO DE TURNO`,
-    `${new Date().toLocaleDateString("pt-PT",{day:"2-digit",month:"long",year:"numeric"})}`,``,
-    `${session?.colaborador}`,
-    `${session?.quiosque} · ${session?.horaEntrada} – ${session?.horaSaida}`,``,
+    `RELATÓRIO DE TURNO`,`${new Date().toLocaleDateString("pt-PT",{day:"2-digit",month:"long",year:"numeric"})}`,``,
+    `${session?.colaborador}`,`${session?.quiosque} · ${session?.horaEntrada} – ${session?.horaSaida}`,``,
     `─────────────────────`,`ABORDAGENS`,``,
     `Total          ${String(myS.total).padStart(3)}`,
     `Conversas      ${String(myS.conversas).padStart(3)}`,
@@ -420,7 +417,8 @@ function App(){
     `Combina        ${String(myS.combina).padStart(3)}`,
     `Energia        ${String(myS.energia).padStart(3)}`,
     `Novo Cliente   ${String(myS.novoCliente).padStart(3)}`,
-    `Alarme         ${String(myS.alarme).padStart(3)}`,``,
+    `Alarme         ${String(myS.alarme).padStart(3)}`,
+    ...(myS.outros>0?[`Outros         ${String(myS.outros).padStart(3)}`]:[]),``,
     `─────────────────────`,`LEADS          ${String(myS.leads).padStart(3)}`,``,
     `─────────────────────`,`Taxa conversão   ${txConv}%`,
     ...(fechoObs?[``,`─────────────────────`,`OBSERVAÇÕES`,``,fechoObs]:[]),
@@ -428,51 +426,27 @@ function App(){
 
   const copyReport=()=>{
     const t=buildReport();
-    if(navigator.clipboard){
-      navigator.clipboard.writeText(t).catch(()=>{
-        const e=document.createElement("textarea");e.value=t;
-        document.body.appendChild(e);e.select();document.execCommand("copy");document.body.removeChild(e);
-      });
-    }
+    if(navigator.clipboard){navigator.clipboard.writeText(t).catch(()=>{const e=document.createElement("textarea");e.value=t;document.body.appendChild(e);e.select();document.execCommand("copy");document.body.removeChild(e);});}
     setReportCopied(true);setTimeout(()=>setReportCopied(false),2500);
   };
 
-  // Gerar imagem PNG: tenta copiar para clipboard; fallback para download
-  const [imgCopied,setImgCopied]=useState(false);
   const generateImage=async()=>{
     setImgGenerating(true);
     const el=document.getElementById("report-card");
     if(!el){setImgGenerating(false);return;}
     try{
       const canvas=await html2canvas(el,{scale:2,backgroundColor:"#F0F0F5",useCORS:true,logging:false});
-      // Tentar copiar para clipboard (Chrome/Edge/Safari HTTPS)
       let copied=false;
       if(navigator.clipboard&&window.ClipboardItem){
-        try{
-          await new Promise((res,rej)=>canvas.toBlob(b=>{
-            if(!b)return rej(new Error("blob null"));
-            navigator.clipboard.write([new ClipboardItem({"image/png":b})])
-              .then(res).catch(rej);
-          },"image/png"));
-          copied=true;
-        }catch(e){console.warn("clipboard copy failed, fallback to download",e);}
+        try{await new Promise((res,rej)=>canvas.toBlob(b=>{if(!b)return rej();navigator.clipboard.write([new ClipboardItem({"image/png":b})]).then(res).catch(rej);},"image/png"));copied=true;}
+        catch(e){console.warn("clipboard",e);}
       }
-      if(copied){
-        setImgCopied(true);
-        setTimeout(()=>setImgCopied(false),2800);
-      } else {
-        // fallback: download do ficheiro
-        const url=canvas.toDataURL("image/png");
-        const a=document.createElement("a");
-        a.href=url;
-        a.download=`Relatorio_${session?.colaborador||"turno"}_${dtag}.png`;
-        document.body.appendChild(a);a.click();document.body.removeChild(a);
-      }
+      if(copied){setImgCopied(true);setTimeout(()=>setImgCopied(false),2800);}
+      else{const url=canvas.toDataURL("image/png");const a=document.createElement("a");a.href=url;a.download=`Relatorio_${session?.colaborador||"turno"}_${dtag}.png`;document.body.appendChild(a);a.click();document.body.removeChild(a);}
     }catch(e){console.error(e);}
     finally{setImgGenerating(false);}
   };
 
-  // ── LOADING ────────────────────────────────────────────────────────────────
   if(loading)return(
     <div className="min-h-screen flex flex-col items-center justify-center gap-6" style={{background:"linear-gradient(160deg,#0a0a0a,#1a1a2e)"}}>
       <Logo size="lg" dark/>
@@ -480,8 +454,7 @@ function App(){
     </div>
   );
 
-  // ── LOGIN ──────────────────────────────────────────────────────────────────
-  // P2: só mostra login se não houver sessão E não estiver em guestMode
+  // ── LOGIN ─────────────────────────────────────────────────────────────────
   if(!session&&!guestMode)return(
     <div className="min-h-screen flex flex-col" style={{background:"linear-gradient(160deg,#0a0a0a 0%,#1a1a2e 60%,#0f2027 100%)"}}>
       <div className="flex-1 flex flex-col items-center justify-center p-5 gap-7">
@@ -489,8 +462,9 @@ function App(){
         <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl fadeUp space-y-5">
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">Iniciar turno</p>
           <div>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Nome</p>
-            <input value={lNome} onChange={e=>setLNome(e.target.value)} placeholder="O teu nome"
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Utilizador</p>
+            <input value={lUser} onChange={e=>setLUser(e.target.value)} placeholder="O teu utilizador"
+              autoCapitalize="none" autoCorrect="off" autoComplete="username"
               className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3.5 text-sm font-medium focus:outline-none focus:border-gray-400 focus:bg-white transition-all"/>
           </div>
           <div>
@@ -506,13 +480,14 @@ function App(){
           </div>
           <div>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Turno</p>
+            {/* [FIX 1] Turno selecionado = verde (igual às outras seleções da app) */}
             <div className="grid grid-cols-2 gap-2">
               {TURNOS.map(t=>(
                 <button key={t.id} onClick={()=>setLTurno(t.id)}
                   className={`py-4 rounded-2xl border-2 text-left px-4 transition-all active:scale-[.97]
-                    ${lTurno===t.id?"border-gray-900 bg-gray-900 text-white":"border-gray-100 bg-gray-50 text-gray-700"}`}>
-                  <p className={`font-black text-sm leading-tight ${lTurno===t.id?"text-white":"text-gray-800"}`}>{t.label}</p>
-                  <p className={`text-xs mt-0.5 font-medium ${lTurno===t.id?"text-gray-300":"text-gray-400"}`}>{t.sub}</p>
+                    ${lTurno===t.id?"border-emerald-500 bg-emerald-50":"border-gray-100 bg-gray-50"}`}>
+                  <p className={`font-black text-sm leading-tight ${lTurno===t.id?"text-emerald-800":"text-gray-800"}`}>{t.label}</p>
+                  <p className={`text-xs mt-0.5 font-medium ${lTurno===t.id?"text-emerald-600":"text-gray-400"}`}>{t.sub}</p>
                 </button>
               ))}
             </div>
@@ -533,7 +508,6 @@ function App(){
               ${canLogin?"bg-gray-900 text-white shadow-lg":"bg-gray-100 text-gray-300 cursor-not-allowed"}`}>
             Entrar
           </button>
-          {/* P2: Acesso ao dashboard sem turno */}
           <button onClick={()=>{setGuestMode(true);setTab("dash");}}
             className="w-full py-3.5 rounded-2xl border-2 border-gray-100 bg-gray-50 text-gray-500 font-bold text-sm active:scale-95 transition-all flex items-center justify-center gap-2">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -546,7 +520,7 @@ function App(){
     </div>
   );
 
-  // ── RELATÓRIO ──────────────────────────────────────────────────────────────
+  // ── RELATÓRIO ─────────────────────────────────────────────────────────────
   if(showReport)return(
     <div className="min-h-screen bg-gray-100 fadeUp">
       <div className="px-5 pt-12 pb-5 bg-white border-b border-gray-100">
@@ -555,10 +529,8 @@ function App(){
         <p className="text-2xl font-black text-gray-900">{session.colaborador}</p>
         <p className="text-sm text-gray-400 font-medium mt-0.5">{session.quiosque} · {session.horaEntrada}–{session.horaSaida}</p>
       </div>
-      <div className="p-5 max-w-md mx-auto space-y-4 pb-12">
-        {/* Card que será capturado como imagem */}
+      <div className="p-5 max-w-md mx-auto space-y-4 safe-bottom">
         <div id="report-card" className="space-y-4 p-4 rounded-3xl" style={{background:"#F0F0F5"}}>
-          {/* Cabeçalho dentro da imagem */}
           <div className="bg-white rounded-3xl px-5 py-4">
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Relatório de turno</p>
             <p className="text-xl font-black text-gray-900">{session.colaborador}</p>
@@ -575,40 +547,29 @@ function App(){
             <StatRow label="Energia Galp" value={myS.energia}/>
             <StatRow label="Novo Cliente NOS" value={myS.novoCliente}/>
             <StatRow label="Alarme" value={myS.alarme}/>
+            {myS.outros>0&&<StatRow label="Outros" value={myS.outros}/>}
           </Card>
           <div className="grid grid-cols-2 gap-3">
             <KPILeads total={myS.leads}/>
             <Card className="p-5">
               <SLabel>Perfil Combina</SLabel>
-              {[["C0",myS.c0,"bg-gray-300"],["C1",myS.c1,"bg-yellow-400"],["C2",myS.c2,"bg-blue-400"],["C3",myS.c3,"bg-emerald-500"]].map(([l,v,c])=>(
+              {[["S/C",myS.c0,"bg-gray-300"],["C1",myS.c1,"bg-yellow-400"],["C2",myS.c2,"bg-blue-400"],["C3",myS.c3,"bg-emerald-500"]].map(([l,v,c])=>(
                 <div key={l} className="flex items-center gap-2 mb-1.5 last:mb-0">
-                  <span className="text-[10px] text-gray-400 font-bold w-5">{l}</span>
+                  <span className="text-[10px] text-gray-400 font-bold w-6">{l}</span>
                   <ProgressBar value={v} max={myS.conversas||1} color={c}/>
                   <span className="text-xs font-black text-gray-700 w-4 text-right">{v}</span>
                 </div>
               ))}
             </Card>
           </div>
-          {fechoObs&&(
-            <Card className="p-5">
-              <SLabel>Observações do turno</SLabel>
-              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{fechoObs}</p>
-            </Card>
-          )}
+          {fechoObs&&<Card className="p-5"><SLabel>Observações do turno</SLabel><p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{fechoObs}</p></Card>}
         </div>
-        {/* Botões de ação — fora da área capturada */}
         <button onClick={generateImage} disabled={imgGenerating}
           className={`w-full py-4 rounded-2xl font-bold text-sm tracking-wide transition-all active:scale-95 shadow-sm flex items-center justify-center gap-2
             ${imgGenerating?"bg-gray-300 text-gray-500 cursor-wait":imgCopied?"bg-emerald-600 text-white":"bg-gray-900 text-white"}`}>
-          {imgGenerating?(
-            <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full spin"/>A gerar...</>
-          ):imgCopied?(
-            <>✓ Imagem copiada! Cola no WhatsApp</>
-          ):(
-            <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
-            </svg>Copiar Imagem (WhatsApp)</>
-          )}
+          {imgGenerating?(<><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full spin"/>A gerar...</>)
+           :imgCopied?(<>✓ Imagem copiada! Cola no WhatsApp</>)
+           :(<><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>Copiar Imagem (WhatsApp)</>)}
         </button>
         <button onClick={copyReport}
           className={`w-full py-4 rounded-2xl font-bold text-sm tracking-wide transition-all active:scale-95
@@ -626,40 +587,27 @@ function App(){
     </div>
   );
 
-  // ── MAIN APP ───────────────────────────────────────────────────────────────
+  // ── MAIN APP ──────────────────────────────────────────────────────────────
   return(
     <div className="min-h-screen bg-gray-100">
-
-      {/* P3: Modal de confirmação de Fecho de Turno */}
       {showFechoConfirm&&(
-        <div className="fixed inset-0 z-50 flex items-end justify-center pb-6 px-4" style={{background:"rgba(0,0,0,0.55)"}}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center px-4" style={{paddingBottom:"calc(1.5rem + var(--safe-bottom))",background:"rgba(0,0,0,0.55)"}}>
           <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl slideUp">
             <p className="font-black text-gray-900 text-xl mb-1">Fecho de Turno</p>
             <p className="text-sm text-gray-500 font-medium mb-5">Confirmas que queres fechar o turno?</p>
             <div className="mb-5">
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Observações (opcional)</p>
-              <textarea
-                value={fechoObs}
-                onChange={e=>setFechoObs(e.target.value)}
-                placeholder="Notas sobre o turno..."
-                rows="3"
+              <textarea value={fechoObs} onChange={e=>setFechoObs(e.target.value)} placeholder="Notas sobre o turno..." rows="3"
                 className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3.5 text-sm font-medium focus:outline-none focus:border-blue-300 focus:bg-white transition-all resize-none"/>
             </div>
             <div className="flex gap-3">
-              <button onClick={()=>setShowFechoConfirm(false)}
-                className="flex-1 py-4 rounded-2xl border-2 border-gray-200 text-gray-600 font-bold text-sm active:scale-95 transition-all">
-                Não
-              </button>
-              <button onClick={doFechoTurno}
-                className="flex-1 py-4 rounded-2xl bg-gray-900 text-white font-bold text-sm active:scale-95 transition-all">
-                Sim, fechar
-              </button>
+              <button onClick={()=>setShowFechoConfirm(false)} className="flex-1 py-4 rounded-2xl border-2 border-gray-200 text-gray-600 font-bold text-sm active:scale-95 transition-all">Não</button>
+              <button onClick={doFechoTurno} className="flex-1 py-4 rounded-2xl bg-gray-900 text-white font-bold text-sm active:scale-95 transition-all">Sim, fechar</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Header */}
       <div className="bg-white border-b border-gray-100 px-5 pt-10 pb-3">
         <div className="flex items-center justify-between max-w-md mx-auto">
           <div className="flex items-center gap-3">
@@ -679,30 +627,16 @@ function App(){
               </div>
             )}
           </div>
-          {session?(
-            /* P3: Botão "Fecho de turno" com modal de confirmação */
-            <button onClick={()=>setShowFechoConfirm(true)}
-              className="bg-gray-900 text-white text-[11px] font-bold px-3 py-2.5 rounded-xl tracking-wide active:scale-95 transition-all">
-              Fecho de turno
-            </button>
-          ):(
-            /* P2: Botão voltar para login quando em guestMode */
-            <button onClick={()=>setGuestMode(false)}
-              className="text-sm font-semibold text-blue-500 active:scale-95 transition-all">
-              ← Login
-            </button>
-          )}
+          {session
+            ?<button onClick={()=>setShowFechoConfirm(true)} className="bg-gray-900 text-white text-[11px] font-bold px-3 py-2.5 rounded-xl tracking-wide active:scale-95 transition-all">Fecho de turno</button>
+            :<button onClick={()=>setGuestMode(false)} className="text-sm font-semibold text-blue-500 active:scale-95 transition-all">← Login</button>
+          }
         </div>
       </div>
 
-      {/* Tab bar */}
-      {/* P2: Em guestMode apenas tab Dashboard; com sessão as 3 tabs normais */}
       <div className="bg-white border-b border-gray-100 sticky top-0 z-20">
         <div className="flex max-w-md mx-auto">
-          {(session
-            ? [["novo","Registo"],["hist","Histórico"],["dash","Dashboard"]]
-            : [["dash","Dashboard"]]
-          ).map(([id,lbl])=>(
+          {(session?[["novo","Registo"],["hist","Histórico"],["dash","Dashboard"]]:[["dash","Dashboard"]]).map(([id,lbl])=>(
             <button key={id} onClick={()=>setTab(id)}
               className={`flex-1 py-3.5 text-xs font-bold border-b-2 transition-all tracking-wide ${tab===id?"border-gray-900 text-gray-900":"border-transparent text-gray-300"}`}>
               {lbl}
@@ -711,45 +645,87 @@ function App(){
         </div>
       </div>
 
-      <div className="p-4 max-w-md mx-auto pb-20 space-y-3" key={tab}>
+      <div className="p-4 max-w-md mx-auto safe-bottom space-y-3" key={tab}>
 
         {/* ── REGISTO ── */}
         {tab==="novo"&&session&&(
           <div className="space-y-3 fadeUp">
-
-            {/* P4: Barra Live View / Ponto de Situação */}
-            <LiveViewBar
-              abordagens={myS.total}
-              vendas={myTotV}
-              leads={myS.leads}
-              taxa={txConv}
-            />
-
+            <LiveViewBar abordagens={myS.total} vendas={myTotV} leads={myS.leads} taxa={txConv}/>
             <Card className="p-5">
               <div className="flex gap-1.5 mb-6">
                 {steps.map((_,i)=><div key={i} className={`h-1 flex-1 rounded-full transition-all ${i<=step?"bg-gray-900":"bg-gray-100"}`}/>)}
               </div>
+
+              {/* Passo 1 */}
               {sn==="aceitou"&&<div className="pop space-y-2">
                 <p className="text-xl font-black text-gray-900 mb-1">Abordagem</p>
                 <p className="text-sm text-gray-400 font-medium mb-5">O cliente aceitou ouvir?</p>
-                <RadioCard label="Sim, ouviu" desc="Ficou a ouvir a proposta" selected={aceitou===true} onClick={()=>setAceitou(true)} accentColor="border-emerald-500 bg-emerald-50"/>
-                <RadioCard label="Não, recusou" desc="Não quis ouvir" selected={aceitou===false} onClick={()=>setAceitou(false)} accentColor="border-red-400 bg-red-50"/>
+                <RadioCard label="Sim, ouviu" selected={aceitou===true} onClick={()=>setAceitou(true)} selColor="green"/>
+                <RadioCard label="Não, recusou" selected={aceitou===false} onClick={()=>setAceitou(false)} selColor="red"/>
               </div>}
-              {sn==="combina"&&<div className="pop space-y-2">
-                <p className="text-xl font-black text-gray-900 mb-1">Perfil Combina</p>
-                <p className="text-sm text-gray-400 font-medium mb-5">Nível do cliente</p>
-                <RadioCard label="Sem Combina" desc="Sem Cartão Continente ativo" selected={isCombina===false} onClick={()=>setIC(false)}/>
-                <RadioCard label="Combina 1" desc="Continente + NOS" selected={isCombina===1} onClick={()=>setIC(1)} accentColor="border-yellow-400 bg-yellow-50"/>
-                <RadioCard label="Combina 2" desc="Continente + NOS + Galp Energia" selected={isCombina===2} onClick={()=>setIC(2)} accentColor="border-blue-400 bg-blue-50"/>
-                <RadioCard label="Combina 3" desc="Continente + NOS + Galp Energia + Solar" selected={isCombina===3} onClick={()=>setIC(3)} accentColor="border-emerald-400 bg-emerald-50"/>
+
+              {/* Passo 2 — Perfil */}
+              {sn==="perfil"&&<div className="pop space-y-5">
+                <p className="text-xl font-black text-gray-900">Perfil do cliente</p>
+
+                {/* Cartão Continente */}
+                <div>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Cartão Continente?</p>
+                  <div className="flex gap-2">
+                    <button onClick={()=>{setTemContinente(true);setIC(null);}}
+                      className={`flex-1 py-3.5 rounded-2xl border-2 font-bold text-sm transition-all active:scale-[.97]
+                        ${temContinente===true?"border-emerald-500 bg-emerald-50 text-emerald-700":"border-gray-100 bg-gray-50 text-gray-500"}`}>Sim</button>
+                    <button onClick={()=>{setTemContinente(false);setIC(null);}}
+                      className={`flex-1 py-3.5 rounded-2xl border-2 font-bold text-sm transition-all active:scale-[.97]
+                        ${temContinente===false?"border-red-400 bg-red-50 text-red-600":"border-gray-100 bg-gray-50 text-gray-500"}`}>Não</button>
+                  </div>
+                </div>
+
+                {/* Cliente NOS */}
+                <div>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">É cliente NOS?</p>
+                  <div className="flex gap-2">
+                    <button onClick={()=>setClienteNOS(true)}
+                      className={`flex-1 py-3.5 rounded-2xl border-2 font-bold text-sm transition-all active:scale-[.97]
+                        ${clienteNOS===true?"border-emerald-500 bg-emerald-50 text-emerald-700":"border-gray-100 bg-gray-50 text-gray-500"}`}>Sim</button>
+                    <button onClick={()=>setClienteNOS(false)}
+                      className={`flex-1 py-3.5 rounded-2xl border-2 font-bold text-sm transition-all active:scale-[.97]
+                        ${clienteNOS===false?"border-red-400 bg-red-50 text-red-600":"border-gray-100 bg-gray-50 text-gray-500"}`}>Não</button>
+                  </div>
+                </div>
+
+                {/* [FIX 2] Perfil Combina — sem legendas, seleção a amarelo */}
+                {temContinente===true&&(
+                  <div className="pop">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Perfil Combina</p>
+                    <div className="space-y-2">
+                      <RadioCard label="Sem Combina" selected={isCombina===0} onClick={()=>setIC(0)} selColor="amber"/>
+                      <RadioCard label="Combina 1"   selected={isCombina===1} onClick={()=>setIC(1)} selColor="amber"/>
+                      <RadioCard label="Combina 2"   selected={isCombina===2} onClick={()=>setIC(2)} selColor="amber"/>
+                      <RadioCard label="Combina 3"   selected={isCombina===3} onClick={()=>setIC(3)} selColor="amber"/>
+                    </div>
+                  </div>
+                )}
               </div>}
+
+              {/* Passo 3 — Vendas com banner Ação Proposta micro */}
               {sn==="vendas"&&<div className="pop space-y-2">
                 <p className="text-xl font-black text-gray-900 mb-1">Resultado</p>
-                <p className="text-sm text-gray-400 font-medium mb-5">O que foi vendido?</p>
-                {vendasPorCombina(isCombina).map(([key,label])=>(
-                  <CheckCard key={key} label={label} checked={vendas[key]} onClick={()=>setVendas(v=>({...v,[key]:!v[key]}))}/>
-                ))}
+                <p className="text-sm text-gray-400 font-medium mb-4">O que foi vendido?</p>
+                <CheckCard label="Energia Galp"     checked={vendas.energia}     onClick={()=>setVendas(v=>({...v,energia:!v.energia}))}     acaoProposta={acaoProposta.includes("energia")}/>
+                <CheckCard label="Novo Cliente NOS"  checked={vendas.novoCliente} onClick={()=>setVendas(v=>({...v,novoCliente:!v.novoCliente}))} acaoProposta={acaoProposta.includes("novoCliente")}/>
+                <CheckCard label="Combina"           checked={vendas.combina}     onClick={()=>setVendas(v=>({...v,combina:!v.combina}))}     acaoProposta={acaoProposta.includes("combina")}/>
+                <CheckCard label="Alarme"            checked={vendas.alarme}      onClick={()=>setVendas(v=>({...v,alarme:!v.alarme}))}/>
+                <CheckCard label="Outros"            checked={vendas.outros}      onClick={()=>setVendas(v=>({...v,outros:!v.outros,outrosDesc:v.outros?"":v.outrosDesc}))}/>
+                {vendas.outros&&(
+                  <div className="pop">
+                    <input value={vendas.outrosDesc} onChange={e=>setVendas(v=>({...v,outrosDesc:e.target.value}))}
+                      placeholder="Descreve o produto..."
+                      className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3.5 text-sm font-medium focus:outline-none focus:border-gray-400 focus:bg-white transition-all"/>
+                  </div>
+                )}
               </div>}
+
               <div className="flex gap-2 mt-6">
                 {step>0&&!flash&&(
                   <button onClick={()=>setStep(s=>s-1)} className="px-5 py-4 rounded-2xl border border-gray-200 text-gray-500 font-bold text-sm active:scale-95 transition-all">←</button>
@@ -769,7 +745,6 @@ function App(){
               </div>
             </Card>
 
-            {/* P1: Lead card só aparece quando o cliente aceitou ouvir */}
             {aceitou===true&&(
               <Card className="p-5">
                 <div className="flex items-center justify-between">
@@ -811,11 +786,7 @@ function App(){
             </div>
             {(()=>{
               const dayR=records.filter(r=>isoDay(r.ts)===histDate);
-              // P5: filtro "lead" mostra registos com lead independentemente do tipo
-              // (inclui cenário venda+lead)
-              const filtered=histFilter==="all"?dayR:
-                histFilter==="lead"?dayR.filter(r=>r.lead):
-                dayR.filter(r=>r.tipo===histFilter);
+              const filtered=histFilter==="all"?dayR:histFilter==="lead"?dayR.filter(r=>r.lead):dayR.filter(r=>r.tipo===histFilter);
               const ds=stats(dayR);
               return(<>
                 <Card className="overflow-hidden">
@@ -832,21 +803,21 @@ function App(){
                   ?<Card className="p-10 text-center"><p className="text-gray-300 font-medium text-sm">Sem registos</p></Card>
                   :filtered.map(r=>{
                     const cfg=TIPO_CFG[r.tipo]||TIPO_CFG.sem_venda;
+                    const combinaLabel=r.isCombina===0?"Sem Combina":r.isCombina?`C${r.isCombina}`:null;
                     return(
                       <div key={r.id} className={`rounded-3xl border-2 p-4 ${cfg.bg} ${cfg.border}`}>
                         <div className="flex items-start justify-between mb-2">
                           <div className="flex flex-wrap gap-1.5 flex-1">
                             <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${cfg.badge}`}>{cfg.label}</span>
-                            {/* P5: badge para registos com venda E lead */}
-                            {r.lead&&r.tipo==="venda"&&(
-                              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">+ Lead</span>
-                            )}
-                            {r.isCombina===false&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-gray-200 text-gray-600">Sem Combina</span>}
-                            {r.isCombina>0&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">C{r.isCombina}</span>}
+                            {r.lead&&r.tipo==="venda"&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">+ Lead</span>}
+                            {r.temContinente===false&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-600">Sem CC</span>}
+                            {combinaLabel&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">{combinaLabel}</span>}
+                            {r.clienteNOS===false&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-100 text-orange-600">Não NOS</span>}
                             {r.vendas?.combina&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700">Combina</span>}
                             {r.vendas?.energia&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-100 text-orange-700">Energia</span>}
                             {r.vendas?.novoCliente&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">Novo NOS</span>}
                             {r.vendas?.alarme&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-gray-200 text-gray-700">Alarme</span>}
+                            {r.vendas?.outros&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">Outros{r.vendas.outrosDesc?`: ${r.vendas.outrosDesc}`:""}</span>}
                           </div>
                           <div className="text-right shrink-0 ml-3">
                             <p className="text-[11px] text-gray-500 font-bold">{fmtTime(r.ts)}</p>
@@ -869,15 +840,12 @@ function App(){
         )}
 
         {/* ── DASHBOARD ── */}
-        {/* P2: Dashboard acessível sem sessão (guestMode) */}
         {tab==="dash"&&(
           <div className="fadeUp">
             {!unlocked?(
               <Card className="p-6 text-center">
                 <div className="w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                  </svg>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                 </div>
                 <p className="font-black text-gray-900 text-lg mb-1">Dashboard</p>
                 <p className="text-sm text-gray-400 font-medium mb-6">Acesso exclusivo para gestores</p>
@@ -888,14 +856,12 @@ function App(){
                     ${pinErr?"border-red-300 bg-red-50":"border-gray-100 bg-gray-50 focus:border-gray-400 focus:bg-white"}`}/>
                 {pinErr&&<p className="text-xs text-red-400 font-bold mb-3">PIN incorreto</p>}
                 <button onClick={()=>{if(pin===DASHBOARD_PIN){setUnlocked(true);setPinErr(false);}else setPinErr(true);}}
-                  className="w-full py-4 rounded-2xl bg-gray-900 text-white font-bold text-sm tracking-wide active:scale-95 transition-all">
-                  Entrar
-                </button>
+                  className="w-full py-4 rounded-2xl bg-gray-900 text-white font-bold text-sm tracking-wide active:scale-95 transition-all">Entrar</button>
               </Card>
             ):(()=>{
               const pr=getDashRecords();
               const as=stats(pr);
-              const totV=as.combina+as.energia+as.novoCliente+as.alarme;
+              const totV=as.combina+as.energia+as.novoCliente+as.alarme+as.outros;
               const txDash=as.conversas>0?Math.round(totV/as.conversas*100):0;
               const byQ=QUIOSQUES.map(q=>({q,s:stats(pr.filter(r=>r.quiosque===q))}));
               const days=[...new Set(records.map(r=>isoDay(r.ts)))].sort().reverse().slice(0,15);
@@ -903,44 +869,33 @@ function App(){
               const collabs=[...new Set(pr.map(r=>r.colaborador))].filter(Boolean);
               const colStats=collabs.map(c=>({c,q:pr.find(r=>r.colaborador===c)?.quiosque||"",s:stats(pr.filter(r=>r.colaborador===c))}))
                 .sort((a,b)=>(b.s.vendas+b.s.leads)-(a.s.vendas+a.s.leads));
-
               return(<div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="font-black text-gray-900">Dashboard</p>
                   <button onClick={()=>setUnlocked(false)} className="text-xs text-gray-400 font-semibold">Bloquear</button>
                 </div>
-
                 <Card className="p-4">
                   <div className="flex items-center justify-between mb-3">
                     <SLabel>Período</SLabel>
-                    <button onClick={()=>{setDashFrom(todayISO());setDashTo(todayISO());}}
-                      className="text-[10px] font-bold text-blue-500 bg-blue-50 px-2.5 py-1 rounded-lg active:scale-95 transition-all -mt-2">
-                      Hoje
-                    </button>
+                    <button onClick={()=>{setDashFrom(todayISO());setDashTo(todayISO());}} className="text-[10px] font-bold text-blue-500 bg-blue-50 px-2.5 py-1 rounded-lg active:scale-95 transition-all -mt-2">Hoje</button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <p className="text-[10px] text-gray-400 font-semibold mb-1.5">De</p>
-                      <input type="date" value={dashFrom}
-                        onChange={e=>{const v=e.target.value;setDashFrom(v);if(v>dashTo)setDashTo(v);}}
+                      <input type="date" value={dashFrom} onChange={e=>{const v=e.target.value;setDashFrom(v);if(v>dashTo)setDashTo(v);}}
                         className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-3 py-3 text-sm font-medium focus:outline-none focus:border-gray-300 transition-all"/>
                     </div>
                     <div>
                       <p className="text-[10px] text-gray-400 font-semibold mb-1.5">Até</p>
-                      <input type="date" value={dashTo}
-                        onChange={e=>{const v=e.target.value;setDashTo(v);if(v<dashFrom)setDashFrom(v);}}
+                      <input type="date" value={dashTo} onChange={e=>{const v=e.target.value;setDashTo(v);if(v<dashFrom)setDashFrom(v);}}
                         className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-3 py-3 text-sm font-medium focus:outline-none focus:border-gray-300 transition-all"/>
                     </div>
                   </div>
                   <div className="mt-3 flex items-center justify-between">
                     <p className="text-xs text-gray-400 font-medium">{pr.length} registos · <span className="font-bold text-gray-600">{getPeriodLabel()}</span></p>
-                    <button onClick={()=>exportXLS(pr,getExportFilename())}
-                      className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg active:scale-95 transition-all">
-                      Exportar Excel
-                    </button>
+                    <button onClick={()=>exportXLS(pr,getExportFilename())} className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg active:scale-95 transition-all">Exportar Excel</button>
                   </div>
                 </Card>
-
                 <div className="flex gap-2 overflow-x-auto -mx-1 px-1 pb-1">
                   {[["geral","Geral"],["quiosques","Quiosques"],["dias","Por Dia"],["colabs","Equipa"],["leads","Leads"]].map(([v,l])=>(
                     <button key={v} onClick={()=>setDashView(v)}
@@ -948,7 +903,6 @@ function App(){
                         ${dashView===v?"border-gray-900 bg-gray-900 text-white":"border-gray-200 bg-white text-gray-400"}`}>{l}</button>
                   ))}
                 </div>
-
                 {dashView==="geral"&&<div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <KPIAbordagens total={as.total} conversas={as.conversas} recusas={as.recusas}/>
@@ -960,14 +914,20 @@ function App(){
                     <StatRow label="Energia Galp" value={as.energia}/>
                     <StatRow label="Novo Cliente NOS" value={as.novoCliente}/>
                     <StatRow label="Alarme" value={as.alarme}/>
+                    {as.outros>0&&<StatRow label="Outros" value={as.outros}/>}
+                  </Card>
+                  <Card className="p-5">
+                    <SLabel>Perfil do cliente</SLabel>
+                    <StatRow label="Com Cartão Continente" value={as.comCC}/>
+                    <StatRow label="Sem Cartão Continente" value={as.semCC}/>
                   </Card>
                   <div className="grid grid-cols-2 gap-3">
                     <KPILeads total={as.leads}/>
                     <Card className="p-5">
                       <SLabel>Perfil Combina</SLabel>
-                      {[["C0",as.c0,"bg-gray-300"],["C1",as.c1,"bg-yellow-400"],["C2",as.c2,"bg-blue-400"],["C3",as.c3,"bg-emerald-500"]].map(([l,v,c])=>(
+                      {[["S/C",as.c0,"bg-gray-300"],["C1",as.c1,"bg-yellow-400"],["C2",as.c2,"bg-blue-400"],["C3",as.c3,"bg-emerald-500"]].map(([l,v,c])=>(
                         <div key={l} className="flex items-center gap-2 mb-1.5 last:mb-0">
-                          <span className="text-[10px] text-gray-400 font-bold w-5">{l}</span>
+                          <span className="text-[10px] text-gray-400 font-bold w-6">{l}</span>
                           <ProgressBar value={v} max={as.conversas||1} color={c}/>
                           <span className="text-xs font-black text-gray-700 w-4 text-right">{v}</span>
                         </div>
@@ -975,9 +935,8 @@ function App(){
                     </Card>
                   </div>
                 </div>}
-
                 {dashView==="quiosques"&&<div className="space-y-3">{byQ.map(({q,s})=>{
-                  const tv=s.combina+s.energia+s.novoCliente+s.alarme;
+                  const tv=s.combina+s.energia+s.novoCliente+s.alarme+s.outros;
                   return(
                     <Card key={q} className="overflow-hidden">
                       <div className="px-5 pt-5 pb-3 border-b border-gray-50 flex items-center justify-between">
@@ -997,6 +956,7 @@ function App(){
                         <StatRow label="Energia" value={s.energia}/>
                         <StatRow label="Novo NOS" value={s.novoCliente}/>
                         <StatRow label="Alarme" value={s.alarme}/>
+                        {s.outros>0&&<StatRow label="Outros" value={s.outros}/>}
                       </div>
                       <div className="px-5 pb-4 flex items-center gap-3">
                         <span className="text-xs text-gray-400 font-medium">Conversão</span>
@@ -1006,12 +966,11 @@ function App(){
                     </Card>
                   );
                 })}</div>}
-
                 {dashView==="dias"&&<Card className="divide-y divide-gray-50">
                   {dayStats.length===0&&<div className="p-10 text-center"><p className="text-gray-300 text-sm">Sem dados</p></div>}
                   {dayStats.map(({d,s})=>{
-                    const tv=s.combina+s.energia+s.novoCliente+s.alarme;
-                    const maxV=Math.max(...dayStats.map(x=>x.s.combina+x.s.energia+x.s.novoCliente+x.s.alarme),1);
+                    const tv=s.combina+s.energia+s.novoCliente+s.alarme+s.outros;
+                    const maxV=Math.max(...dayStats.map(x=>x.s.combina+x.s.energia+x.s.novoCliente+x.s.alarme+x.s.outros),1);
                     return(
                       <div key={d} className="px-5 py-4">
                         <div className="flex items-center justify-between mb-2">
@@ -1027,24 +986,17 @@ function App(){
                     );
                   })}
                 </Card>}
-
                 {dashView==="colabs"&&<div className="space-y-3">
                   {colStats.length===0&&<Card className="p-10 text-center"><p className="text-gray-300 text-sm">Sem dados</p></Card>}
                   {colStats.map(({c,q,s},i)=>{
-                    const tv=s.combina+s.energia+s.novoCliente+s.alarme;
+                    const tv=s.combina+s.energia+s.novoCliente+s.alarme+s.outros;
                     const rc=["bg-gray-900 text-white","bg-gray-600 text-white","bg-gray-400 text-white"];
                     return(
                       <Card key={c} className="p-5">
                         <div className="flex items-center gap-3 mb-4">
                           <div className={`w-9 h-9 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 ${rc[i]||"bg-gray-100 text-gray-500"}`}>{i+1}</div>
-                          <div className="flex-1">
-                            <p className="font-bold text-gray-900 text-sm">{c}</p>
-                            <p className="text-xs text-gray-400 font-medium">{q.replace("Quiosque ","")}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-black text-lg" style={{color:"#059669"}}>{tv}</p>
-                            <p className="text-[10px] text-gray-400 font-bold">vendas</p>
-                          </div>
+                          <div className="flex-1"><p className="font-bold text-gray-900 text-sm">{c}</p><p className="text-xs text-gray-400 font-medium">{q.replace("Quiosque ","")}</p></div>
+                          <div className="text-right"><p className="font-black text-lg" style={{color:"#059669"}}>{tv}</p><p className="text-[10px] text-gray-400 font-bold">vendas</p></div>
                         </div>
                         <StatRow label="Abordagens" value={s.total}/>
                         <StatRow label="Leads" value={s.leads}/>
@@ -1057,7 +1009,6 @@ function App(){
                     );
                   })}
                 </div>}
-
                 {dashView==="leads"&&<div className="space-y-3">
                   <div className="grid grid-cols-3 overflow-hidden rounded-3xl shadow-sm bg-white">
                     {[["Total",as.leads],["Hoje",today.filter(r=>r.lead).length],["Quiosques",QUIOSQUES.filter(q=>pr.some(r=>r.lead&&r.quiosque===q)).length]].map(([l,v],i)=>(
@@ -1080,10 +1031,7 @@ function App(){
                         <div className="flex gap-1.5 flex-wrap">
                           <span className="text-[11px] bg-gray-100 text-gray-600 font-bold px-2.5 py-1 rounded-full">{r.colaborador}</span>
                           <span className="text-[11px] font-bold px-2.5 py-1 rounded-full" style={{background:"#eff6ff",color:"#2563eb"}}>{r.quiosque?.replace("Quiosque ","")}</span>
-                          {/* P5: badge indica que esta lead tem também uma venda */}
-                          {r.tipo==="venda"&&(
-                            <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">+ Venda</span>
-                          )}
+                          {r.tipo==="venda"&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">+ Venda</span>}
                         </div>
                       </Card>
                     ))
@@ -1093,7 +1041,6 @@ function App(){
                     Exportar Leads (Excel)
                   </button>
                 </div>}
-
               </div>);
             })()}
           </div>
