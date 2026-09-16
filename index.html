@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover"/>
-  <title>Quiosque Combina v26</title>
+  <title>Quiosque Combina v33</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
@@ -56,6 +56,7 @@ const lsa=k=>{try{return JSON.parse(localStorage.getItem(k)||"[]")}catch{return[
 const lss=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
 
 const todayStr=()=>new Date().toDateString();
+const dayStartISO=()=>{const d=new Date();if(d.getHours()<1)d.setDate(d.getDate()-1);d.setHours(1,0,0,0);const p=n=>String(n).padStart(2,"0");return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T01:00:00.000`;};
 const todayISO=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
 const localISO=()=>{const d=new Date(),p=n=>String(n).padStart(2,"0");return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.000`;};
 const fmtDate=iso=>new Date(iso.length<=10?iso+"T12:00:00":iso).toLocaleDateString("pt-PT");
@@ -281,11 +282,9 @@ function App(){
   const [online,setOnline]=useState(true);
   const [session,setSession]=useState(()=>ls(SK));
 
-  const [lUser,setLUser]=useState("");
   const [lQ,setLQ]=useState("");
-  const [lTurno,setLTurno]=useState(null);
-  const [lCustomIn,setLCustomIn]=useState("");
-  const [lCustomOut,setLCustomOut]=useState("");
+  const [lUser,setLUser]=useState("");
+
 
   const [step,setStep]=useState(0);
   const [aceitou,setAceitou]=useState(null);
@@ -309,12 +308,9 @@ function App(){
   const [dashFrom,setDashFrom]=useState(todayISO());
   const [dashTo,setDashTo]=useState(todayISO());
 
-  const [showReport,setShowReport]=useState(false);
-  const [reportCopied,setReportCopied]=useState(false);
+  const [showStatus,setShowStatus]=useState(false);
   const [imgGenerating,setImgGenerating]=useState(false);
   const [imgCopied,setImgCopied]=useState(false);
-  const [showFechoConfirm,setShowFechoConfirm]=useState(false);
-  const [fechoObs,setFechoObs]=useState("");
   const [guestMode,setGuestMode]=useState(false);
 
   const syncingRef=useRef(false);
@@ -369,19 +365,11 @@ function App(){
     setVendas({combina:false,energia:false,novoCliente:false,alarme:false,outros:false,outrosDesc:""});
     setLead({active:false,nome:"",tel:"",obs:""});
   };
-  const getHorario=()=>{
-    const t=TURNOS.find(t=>t.id===lTurno);
-    if(!t)return{entrada:"",saida:""};
-    if(t.id==="custom")return{entrada:lCustomIn,saida:lCustomOut};
-    return{entrada:t.entrada,saida:t.saida};
-  };
   const doLogin=()=>{
-    const h=getHorario();
-    const s={colaborador:lUser,quiosque:lQ,horaEntrada:h.entrada,horaSaida:h.saida,loginTs:localISO()};
+    const s={colaborador:lUser.trim(),quiosque:lQ,horaEntrada:"",horaSaida:"",loginTs:localISO()};
     setSession(s);lss(SK,s);
   };
-  const doLogout=()=>{localStorage.removeItem(SK);setSession(null);setShowReport(false);setFechoObs("");setGuestMode(false);reset();};
-  const doFechoTurno=()=>{setShowFechoConfirm(false);setShowReport(true);};
+  const doLogout=()=>{localStorage.removeItem(SK);setSession(null);setGuestMode(false);reset();};
 
   const steps=aceitou===false?["aceitou"]:["aceitou","perfil","vendas"];
   const sn=steps[step];
@@ -400,7 +388,7 @@ function App(){
 
   const acaoProposta=aceitou?getAcaoProposta(temContinente,clienteNOS,isCombina):[];
   const hasVenda=vendas.combina||vendas.energia||vendas.novoCliente||vendas.alarme||vendas.outros;
-  const canLogin=lUser.trim()&&lQ&&lTurno&&(lTurno!=="custom"||(lCustomIn&&lCustomOut));
+  const canLogin=!!lQ&&lUser.trim().length>0;
 
   const saveRecord=async()=>{
     if(saving)return;
@@ -448,7 +436,7 @@ function App(){
   };
 
   const today=records.filter(r=>new Date(r.ts).toDateString()===todayStr());
-  const myT=session?records.filter(r=>r.colaborador===session.colaborador&&r.quiosque===session.quiosque&&r.ts>=session.loginTs):[];
+  const myT=session?records.filter(r=>r.quiosque===session.quiosque&&r.ts>=dayStartISO()):[];
   const myS=stats(myT);
   const myTotV=myS.combina+myS.energia+myS.novoCliente+myS.alarme+myS.outros;
   const txConv=myS.conversas>0?Math.round(myTotV/myS.conversas*100):0;
@@ -461,29 +449,6 @@ function App(){
   };
   const getExportFilename=()=>dashFrom===dashTo?`Combina_${dashFrom}.xlsx`:`Combina_${dashFrom}_a_${dashTo}.xlsx`;
 
-  const buildReport=()=>[
-    `RELATÓRIO DE TURNO`,`${new Date().toLocaleDateString("pt-PT",{day:"2-digit",month:"long",year:"numeric"})}`,``,
-    `${session?.colaborador}`,`${session?.quiosque} · ${session?.horaEntrada} – ${session?.horaSaida}`,``,
-    `─────────────────────`,`ABORDAGENS`,``,
-    `Total          ${String(myS.total).padStart(3)}`,
-    `Conversas      ${String(myS.conversas).padStart(3)}`,
-    `Recusas        ${String(myS.recusas).padStart(3)}`,``,
-    `─────────────────────`,`VENDAS         ${String(myTotV).padStart(3)}`,``,
-    `Combina        ${String(myS.combina).padStart(3)}`,
-    `Energia        ${String(myS.energia).padStart(3)}`,
-    `Novo Cliente   ${String(myS.novoCliente).padStart(3)}`,
-    `Alarme         ${String(myS.alarme).padStart(3)}`,
-    ...(myS.outros>0?[`Outros         ${String(myS.outros).padStart(3)}`]:[]),``,
-    `─────────────────────`,`LEADS          ${String(myS.leads).padStart(3)}`,``,
-    `─────────────────────`,`Taxa conversão   ${txConv}%`,
-    ...(fechoObs?[``,`─────────────────────`,`OBSERVAÇÕES`,``,fechoObs]:[]),
-  ].join("\n");
-
-  const copyReport=()=>{
-    const t=buildReport();
-    if(navigator.clipboard){navigator.clipboard.writeText(t).catch(()=>{const e=document.createElement("textarea");e.value=t;document.body.appendChild(e);e.select();document.execCommand("copy");document.body.removeChild(e);});}
-    setReportCopied(true);setTimeout(()=>setReportCopied(false),2500);
-  };
 
   const generateImage=async()=>{
     setImgGenerating(true);
@@ -511,54 +476,40 @@ function App(){
 
   if(!session&&!guestMode)return(
     <div className="min-h-screen flex flex-col" style={{background:"linear-gradient(160deg,#0a0a0a 0%,#1a1a2e 60%,#0f2027 100%)"}}>
-      <div className="flex-1 flex flex-col items-center justify-center p-5 gap-7">
+      <div className="flex-1 flex flex-col items-center justify-center px-6 gap-10">
         <div className="fadeUp"><Logo size="lg" dark/></div>
-        <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl fadeUp space-y-5">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">Iniciar turno</p>
-          <div>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Utilizador</p>
-            <input value={lUser} onChange={e=>setLUser(e.target.value)} placeholder="O teu utilizador"
-              autoCapitalize="none" autoCorrect="off" autoComplete="username"
-              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3.5 text-sm font-medium focus:outline-none focus:border-gray-400 focus:bg-white transition-all"/>
-          </div>
-          <div>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Quiosque</p>
-            <div className="relative">
-              <select value={lQ} onChange={e=>setLQ(e.target.value)}
-                className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3.5 text-sm font-medium appearance-none focus:outline-none focus:border-gray-400 focus:bg-white transition-all cursor-pointer">
-                <option value="">Selecionar...</option>
-                {QUIOSQUES.map(q=><option key={q} value={q}>{q}</option>)}
-              </select>
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none text-xs">▾</span>
+        <div className="w-full max-w-sm fadeUp space-y-3">
+          <p className="text-[10px] font-bold tracking-widest uppercase text-center mb-1" style={{color:"rgba(255,255,255,0.3)"}}>Seleciona o quiosque</p>
+          {QUIOSQUES.map(q=>(
+            <div key={q}
+              className={`w-full rounded-2xl text-left transition-all overflow-hidden
+                ${lQ===q?"shadow-lg":"opacity-70 hover:opacity-100"}`}
+              style={{
+                background: lQ===q?"rgba(255,255,255,1)":"rgba(255,255,255,0.06)",
+                border: lQ===q?"2px solid rgba(255,255,255,1)":"2px solid rgba(255,255,255,0.1)"
+              }}>
+              <button onClick={()=>{setLQ(q);setLUser("");}}
+                className="w-full py-4 px-5 flex items-center justify-between active:scale-[.98] transition-all">
+                <p className={`font-black text-base ${lQ===q?"text-gray-900":"text-white"}`}>{q.replace("Quiosque ","")}</p>
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all
+                  ${lQ===q?"border-gray-900 bg-gray-900":"border-white border-opacity-30"}`}>
+                  {lQ===q&&<div className="w-2 h-2 rounded-full bg-white"/>}
+                </div>
+              </button>
+              {lQ===q&&(
+                <div className="px-5 pb-4 pop">
+                  <input value={lUser} onChange={e=>setLUser(e.target.value)}
+                    placeholder="O teu user"
+                    autoCapitalize="words" autoCorrect="off" autoComplete="name"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-semibold text-gray-800 placeholder-gray-300 focus:outline-none focus:border-gray-400 focus:bg-white transition-all"/>
+                </div>
+              )}
             </div>
-          </div>
-          <div>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Turno</p>
-            <div className="grid grid-cols-2 gap-2">
-              {TURNOS.map(t=>(
-                <button key={t.id} onClick={()=>setLTurno(t.id)}
-                  className={`py-4 rounded-2xl border-2 text-left px-4 transition-all active:scale-[.97]
-                    ${lTurno===t.id?"border-gray-900 bg-gray-900":"border-gray-100 bg-gray-50"}`}>
-                  <p className={`font-black text-sm leading-tight ${lTurno===t.id?"text-white":"text-gray-800"}`}>{t.label}</p>
-                  <p className={`text-xs mt-0.5 font-medium ${lTurno===t.id?"text-gray-400":"text-gray-400"}`}>{t.sub}</p>
-                </button>
-              ))}
-            </div>
-            {lTurno==="custom"&&(
-              <div className="flex gap-3 mt-3 pop">
-                {[[lCustomIn,setLCustomIn,"Entrada"],[lCustomOut,setLCustomOut,"Saída"]].map(([v,s,l])=>(
-                  <div key={l} className="flex-1">
-                    <p className="text-[10px] text-gray-400 font-semibold mb-1.5">{l}</p>
-                    <input type="time" value={v} onChange={e=>s(e.target.value)}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-3 py-3 text-sm font-medium focus:outline-none focus:border-gray-400 transition-all"/>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          ))}
           <button onClick={doLogin} disabled={!canLogin}
-            className={`w-full py-4 rounded-2xl font-bold text-sm tracking-wide transition-all active:scale-95
-              ${canLogin?"bg-gray-900 text-white shadow-lg":"bg-gray-100 text-gray-300 cursor-not-allowed"}`}>
+            className={`w-full py-4 rounded-2xl font-bold text-sm tracking-wide transition-all active:scale-95 mt-2
+              ${canLogin?"text-gray-900 shadow-xl":"cursor-not-allowed"}`}
+            style={{background:canLogin?"#ffffff":"rgba(255,255,255,0.1)",color:canLogin?"#111":"rgba(255,255,255,0.2)"}}>
             Entrar
           </button>
           <button onClick={()=>{setGuestMode(true);setTab("dash");}}
@@ -573,87 +524,48 @@ function App(){
     </div>
   );
 
-  if(showReport)return(
-    <div className="min-h-screen bg-gray-100 fadeUp">
-      <div className="px-5 pt-12 pb-5 bg-white border-b border-gray-100">
-        <button onClick={()=>setShowReport(false)} className="text-sm font-semibold text-blue-500 mb-4 block">← Voltar</button>
-        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Relatório de turno</p>
-        <p className="text-2xl font-black text-gray-900">{session.colaborador}</p>
-        <p className="text-sm text-gray-400 font-medium mt-0.5">{session.quiosque} · {session.horaEntrada}–{session.horaSaida}</p>
-      </div>
-      <div className="p-5 max-w-md mx-auto space-y-4 safe-bottom">
-        <div id="report-card" className="space-y-4 p-4 rounded-3xl" style={{background:"#F0F0F5"}}>
-          <div className="bg-white rounded-3xl px-5 py-4">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Relatório de turno</p>
-            <p className="text-xl font-black text-gray-900">{session.colaborador}</p>
-            <p className="text-xs text-gray-400 font-medium mt-0.5">{session.quiosque} · {session.horaEntrada}–{session.horaSaida}</p>
-            <p className="text-xs text-gray-300 font-medium mt-0.5">{new Date().toLocaleDateString("pt-PT",{day:"2-digit",month:"long",year:"numeric"})}</p>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <KPIAbordagens total={myS.total} conversas={myS.conversas} recusas={myS.recusas}/>
-            <KPIVendas total={myTotV} taxa={txConv}/>
-          </div>
-          <Card className="p-5">
-            <SLabel>Detalhe de vendas</SLabel>
-            <StatRow label="Combina" value={myS.combina}/>
-            <StatRow label="Energia Galp" value={myS.energia}/>
-            <StatRow label="Novo Cliente NOS" value={myS.novoCliente}/>
-            <StatRow label="Alarme" value={myS.alarme}/>
-            {myS.outros>0&&<StatRow label="Outros" value={myS.outros}/>}
-          </Card>
-          <div className="grid grid-cols-2 gap-3">
-            <KPILeads total={myS.leads}/>
-            <Card className="p-5">
-              <SLabel>Perfil Combina</SLabel>
-              {[["S/C",myS.c0,"bg-gray-300"],["C1",myS.c1,"bg-yellow-400"],["C2",myS.c2,"bg-blue-400"],["C3",myS.c3,"bg-emerald-500"]].map(([l,v,c])=>(
-                <div key={l} className="flex items-center gap-2 mb-1.5 last:mb-0">
-                  <span className="text-[10px] text-gray-400 font-bold w-6">{l}</span>
-                  <ProgressBar value={v} max={myS.conversas||1} color={c}/>
-                  <span className="text-xs font-black text-gray-700 w-4 text-right">{v}</span>
-                </div>
-              ))}
-            </Card>
-          </div>
-          {fechoObs&&<Card className="p-5"><SLabel>Observações do turno</SLabel><p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{fechoObs}</p></Card>}
-        </div>
-        <button onClick={generateImage} disabled={imgGenerating}
-          className={`w-full py-4 rounded-2xl font-bold text-sm tracking-wide transition-all active:scale-95 shadow-sm flex items-center justify-center gap-2
-            ${imgGenerating?"bg-gray-300 text-gray-500 cursor-wait":imgCopied?"bg-emerald-600 text-white":"bg-gray-900 text-white"}`}>
-          {imgGenerating?(<><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full spin"/>A gerar...</>)
-           :imgCopied?(<>✓ Imagem copiada! Cola no WhatsApp</>)
-           :(<><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>Copiar Imagem (WhatsApp)</>)}
-        </button>
-        <button onClick={copyReport}
-          className={`w-full py-4 rounded-2xl font-bold text-sm tracking-wide transition-all active:scale-95
-            ${reportCopied?"bg-emerald-600 text-white":"border border-gray-200 bg-white text-gray-600"}`}>
-          {reportCopied?"Copiado!":"Copiar texto (WhatsApp)"}
-        </button>
-        <button onClick={()=>exportXLS(myT,`Turno_${session.colaborador}_${dtag}.xlsx`,fechoObs)}
-          className="w-full py-4 rounded-2xl font-bold text-sm border border-gray-200 bg-white text-gray-600 active:scale-95 transition-all">
-          Exportar Excel
-        </button>
-        <button onClick={doLogout} className="w-full py-3 rounded-2xl font-semibold text-sm text-red-400 active:scale-95 transition-all">
-          Terminar turno
-        </button>
-      </div>
-    </div>
-  );
+  // ── Status modal ──────────────────────────────────────────────────────────
+
 
   return(
     <div className="min-h-screen bg-gray-100">
-      {showFechoConfirm&&(
-        <div className="fixed inset-0 z-50 flex items-end justify-center px-4" style={{paddingBottom:"calc(1.5rem + var(--safe-bottom))",background:"rgba(0,0,0,0.55)"}}>
-          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl slideUp">
-            <p className="font-black text-gray-900 text-xl mb-1">Fecho de Turno</p>
-            <p className="text-sm text-gray-500 font-medium mb-5">Confirmas que queres fechar o turno?</p>
-            <div className="mb-5">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Observações (opcional)</p>
-              <textarea value={fechoObs} onChange={e=>setFechoObs(e.target.value)} placeholder="Notas sobre o turno..." rows="3"
-                className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3.5 text-sm font-medium focus:outline-none focus:border-blue-300 focus:bg-white transition-all resize-none"/>
+      {showStatus&&(
+        <div className="fixed inset-0 z-50 flex items-end justify-center px-4" style={{paddingBottom:"calc(1.5rem + var(--safe-bottom))",background:"rgba(0,0,0,0.55)"}} onClick={()=>setShowStatus(false)}>
+          <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl slideUp overflow-hidden" onClick={e=>e.stopPropagation()}>
+            <div id="report-card" className="p-5 space-y-3" style={{background:"#F0F0F5"}}>
+              <div className="bg-white rounded-2xl px-4 py-3">
+                <p className="font-black text-gray-900 text-base">{session?.quiosque}</p>
+                <p className="text-xs text-gray-400 font-medium">{new Date().toLocaleDateString("pt-PT",{weekday:"long",day:"2-digit",month:"long"})}</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="bg-white rounded-2xl p-3 text-center"><p className="text-2xl font-black text-gray-900">{myS.total}</p><p className="text-[10px] text-gray-400 font-bold mt-0.5">Abord.</p></div>
+                <div className="rounded-2xl p-3 text-center" style={{background:"#f0fdf4"}}><p className="text-2xl font-black text-gray-900">{myTotV}</p><p className="text-[10px] font-bold mt-0.5" style={{color:"#16a34a"}}>Vendas</p></div>
+                <div className="rounded-2xl p-3 text-center" style={{background:"#eff6ff"}}><p className="text-2xl font-black text-gray-900">{myS.leads}</p><p className="text-[10px] font-bold mt-0.5" style={{color:"#2563eb"}}>Leads</p></div>
+              </div>
+              <div className="bg-white rounded-2xl px-4 py-3 space-y-1.5">
+                <StatRow label="Combina" value={myS.combina}/>
+                <StatRow label="Energia Galp" value={myS.energia}/>
+                <StatRow label="Novo Cliente NOS" value={myS.novoCliente}/>
+                <StatRow label="Alarme" value={myS.alarme}/>
+                {myS.outros>0&&<StatRow label="Outros" value={myS.outros}/>}
+                <StatRow label="Conversão" value={`${txConv}%`}/>
+              </div>
             </div>
-            <div className="flex gap-3">
-              <button onClick={()=>setShowFechoConfirm(false)} className="flex-1 py-4 rounded-2xl border-2 border-gray-200 text-gray-600 font-bold text-sm active:scale-95 transition-all">Não</button>
-              <button onClick={doFechoTurno} className="flex-1 py-4 rounded-2xl bg-gray-900 text-white font-bold text-sm active:scale-95 transition-all">Sim, fechar</button>
+            <div className="p-4 space-y-2">
+              <button onClick={generateImage} disabled={imgGenerating}
+                className={`w-full py-3.5 rounded-2xl font-bold text-sm tracking-wide transition-all active:scale-95 flex items-center justify-center gap-2
+                  ${imgGenerating?"bg-gray-100 text-gray-400 cursor-wait":imgCopied?"bg-emerald-600 text-white":"bg-gray-900 text-white"}`}>
+                {imgGenerating?(<><div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full spin"/>A gerar...</>)
+                 :imgCopied?<>✓ Imagem copiada!</>
+                 :(<><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>Copiar Imagem (WhatsApp)</>)}
+              </button>
+              <button onClick={()=>{exportXLS(myT,`Status_${session?.quiosque?.replace("Quiosque ","")}_${dtag}.xlsx`);}}
+                className="w-full py-3.5 rounded-2xl font-bold text-sm border border-gray-200 bg-white text-gray-600 active:scale-95 transition-all">
+                Exportar Excel
+              </button>
+              <button onClick={doLogout} className="w-full py-2.5 rounded-2xl font-semibold text-xs text-red-400 active:scale-95 transition-all">
+                Terminar sessão
+              </button>
             </div>
           </div>
         </div>
@@ -667,12 +579,13 @@ function App(){
               <div>
                 <div className="flex items-center gap-1.5">
                   <p className="font-bold text-gray-900 text-xs">{session.quiosque.replace("Quiosque ","")}</p>
+                  <p className="text-[10px] text-gray-400 font-medium mt-0">{session.colaborador}</p>
                   {queueCount>0
                     ?<span className="text-[10px] font-black bg-amber-400 text-white rounded-full px-1.5 py-0.5 leading-none">{queueCount}⬆</span>
                     :<div className={`w-1.5 h-1.5 rounded-full ${syncing?"bg-amber-400":online?"bg-emerald-500":"bg-red-400"}`}/>
                   }
                 </div>
-                <p className="text-[10px] text-gray-400 font-medium">{session.colaborador} · {session.horaEntrada}–{session.horaSaida}</p>
+                
               </div>
             ):(
               <div>
@@ -682,7 +595,7 @@ function App(){
             )}
           </div>
           {session
-            ?<button onClick={()=>setShowFechoConfirm(true)} className="bg-gray-900 text-white text-[11px] font-bold px-3 py-2.5 rounded-xl tracking-wide active:scale-95 transition-all">Fecho de turno</button>
+            ?<button onClick={()=>setShowStatus(true)} className="bg-gray-900 text-white text-[11px] font-bold px-3 py-2.5 rounded-xl tracking-wide active:scale-95 transition-all">Status</button>
             :<button onClick={()=>setGuestMode(false)} className="text-sm font-semibold text-blue-500 active:scale-95 transition-all">← Login</button>
           }
         </div>
@@ -828,7 +741,7 @@ function App(){
               ))}
             </div>
             {(()=>{
-              const dayR=records.filter(r=>isoDay(r.ts)===histDate&&r.quiosque===session.quiosque&&r.colaborador===session.colaborador);
+              const dayR=records.filter(r=>isoDay(r.ts)===histDate&&r.quiosque===session.quiosque);
               const filtered=histFilter==="all"?dayR:histFilter==="lead"?dayR.filter(r=>r.lead):dayR.filter(r=>r.tipo===histFilter);
               const ds=stats(dayR);
               return(<>
@@ -930,11 +843,11 @@ function App(){
               const totV=as.combina+as.energia+as.novoCliente+as.alarme+as.outros;
               const txDash=as.conversas>0?Math.round(totV/as.conversas*100):0;
               const byQ=QUIOSQUES.map(q=>({q,s:stats(pr.filter(r=>r.quiosque===q))}));
+              const collabs=[...new Set(pr.map(r=>r.colaborador))].filter(Boolean);
+              const colStats=collabs.map(col=>({c:col,q:pr.find(r=>r.colaborador===col)?.quiosque||"",s:stats(pr.filter(r=>r.colaborador===col))}))
+                .sort((a,b)=>(b.s.vendas+b.s.leads)-(a.s.vendas+a.s.leads));
               const days=[...new Set(records.map(r=>isoDay(r.ts)))].sort().reverse().slice(0,15);
               const dayStats=days.map(d=>({d,s:stats(records.filter(r=>isoDay(r.ts)===d))}));
-              const collabs=[...new Set(pr.map(r=>r.colaborador))].filter(Boolean);
-              const colStats=collabs.map(c=>({c,q:pr.find(r=>r.colaborador===c)?.quiosque||"",s:stats(pr.filter(r=>r.colaborador===c))}))
-                .sort((a,b)=>(b.s.vendas+b.s.leads)-(a.s.vendas+a.s.leads));
               return(<div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="font-black text-gray-900">Dashboard</p>
@@ -963,7 +876,7 @@ function App(){
                   </div>
                 </Card>
                 <div className="flex gap-2 overflow-x-auto -mx-1 px-1 pb-1">
-                  {[["geral","Geral"],["quiosques","Quiosques"],["dias","Por Dia"],["colabs","Equipa"],["leads","Leads"]].map(([v,l])=>(
+                  {[["geral","Geral"],["quiosques","Quiosques"],["colabs","Equipa"],["dias","Por Dia"],["leads","Leads"]].map(([v,l])=>(
                     <button key={v} onClick={()=>setDashView(v)}
                       className={`shrink-0 px-4 py-2.5 rounded-xl border text-xs font-bold transition-all
                         ${dashView===v?"border-gray-900 bg-gray-900 text-white":"border-gray-200 bg-white text-gray-400"}`}>{l}</button>
@@ -1032,6 +945,39 @@ function App(){
                     </Card>
                   );
                 })}</div>}
+                {dashView==="colabs"&&<div className="space-y-3">
+                  {colStats.length===0&&<Card className="p-10 text-center"><p className="text-gray-300 text-sm">Sem dados</p></Card>}
+                  {colStats.map(({c:col,q,s},i)=>{
+                    const tv=s.combina+s.energia+s.novoCliente+s.alarme+s.outros;
+                    const rc=["bg-gray-900 text-white","bg-gray-700 text-white","bg-gray-400 text-white"];
+                    return(
+                      <Card key={col} className="p-5">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className={`w-9 h-9 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 ${rc[i]||"bg-gray-100 text-gray-500"}`}>{i+1}</div>
+                          <div className="flex-1">
+                            <p className="font-bold text-gray-900 text-sm">{col}</p>
+                            <p className="text-xs text-gray-400 font-medium">{q.replace("Quiosque ","")}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-black text-lg" style={{color:"#059669"}}>{tv}</p>
+                            <p className="text-[10px] text-gray-400 font-bold">vendas</p>
+                          </div>
+                        </div>
+                        <StatRow label="Abordagens" value={s.total}/>
+                        <StatRow label="Conversas" value={s.conversas}/>
+                        <StatRow label="Combina" value={s.combina}/>
+                        <StatRow label="Energia" value={s.energia}/>
+                        <StatRow label="Novo NOS" value={s.novoCliente}/>
+                        <StatRow label="Leads" value={s.leads}/>
+                        <div className="mt-3 flex items-center gap-3">
+                          <span className="text-xs text-gray-400 font-medium">Conversão</span>
+                          <ProgressBar value={tv} max={s.conversas||1} color="bg-emerald-500"/>
+                          <span className="text-xs font-black text-gray-900">{s.conversas>0?Math.round(tv/s.conversas*100):0}%</span>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>}
                 {dashView==="dias"&&<Card className="divide-y divide-gray-50">
                   {dayStats.length===0&&<div className="p-10 text-center"><p className="text-gray-300 text-sm">Sem dados</p></div>}
                   {dayStats.map(({d,s})=>{
@@ -1052,29 +998,7 @@ function App(){
                     );
                   })}
                 </Card>}
-                {dashView==="colabs"&&<div className="space-y-3">
-                  {colStats.length===0&&<Card className="p-10 text-center"><p className="text-gray-300 text-sm">Sem dados</p></Card>}
-                  {colStats.map(({c,q,s},i)=>{
-                    const tv=s.combina+s.energia+s.novoCliente+s.alarme+s.outros;
-                    const rc=["bg-gray-900 text-white","bg-gray-600 text-white","bg-gray-400 text-white"];
-                    return(
-                      <Card key={c} className="p-5">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className={`w-9 h-9 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 ${rc[i]||"bg-gray-100 text-gray-500"}`}>{i+1}</div>
-                          <div className="flex-1"><p className="font-bold text-gray-900 text-sm">{c}</p><p className="text-xs text-gray-400 font-medium">{q.replace("Quiosque ","")}</p></div>
-                          <div className="text-right"><p className="font-black text-lg" style={{color:"#059669"}}>{tv}</p><p className="text-[10px] text-gray-400 font-bold">vendas</p></div>
-                        </div>
-                        <StatRow label="Abordagens" value={s.total}/>
-                        <StatRow label="Leads" value={s.leads}/>
-                        <div className="mt-3 flex items-center gap-3">
-                          <span className="text-xs text-gray-400 font-medium">Conversão</span>
-                          <ProgressBar value={tv} max={s.conversas||1} color="bg-emerald-500"/>
-                          <span className="text-xs font-black text-gray-900">{s.conversas>0?Math.round(tv/s.conversas*100):0}%</span>
-                        </div>
-                      </Card>
-                    );
-                  })}
-                </div>}
+
                 {dashView==="leads"&&<div className="space-y-3">
                   <div className="grid grid-cols-3 overflow-hidden rounded-3xl shadow-sm bg-white">
                     {[["Total",as.leads],["Hoje",today.filter(r=>r.lead).length],["Quiosques",QUIOSQUES.filter(q=>pr.some(r=>r.lead&&r.quiosque===q)).length]].map(([l,v],i)=>(
