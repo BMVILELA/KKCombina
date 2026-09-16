@@ -366,10 +366,11 @@ function App(){
     setLead({active:false,nome:"",tel:"",obs:""});
   };
   const doLogin=()=>{
+    setShowStatus(false);
     const s={colaborador:lUser.trim(),quiosque:lQ,horaEntrada:"",horaSaida:"",loginTs:localISO()};
     setSession(s);lss(SK,s);
   };
-  const doLogout=()=>{localStorage.removeItem(SK);setSession(null);setGuestMode(false);reset();};
+  const doLogout=()=>{localStorage.removeItem(SK);setSession(null);setShowStatus(false);setImgCopied(false);setGuestMode(false);reset();};
 
   const steps=aceitou===false?["aceitou"]:["aceitou","perfil","vendas"];
   const sn=steps[step];
@@ -529,7 +530,7 @@ function App(){
 
   return(
     <div className="min-h-screen bg-gray-100">
-      {showStatus&&session&&(
+      {showStatus===true&&session!==null&&(
         <div className="fixed inset-0 z-50 flex items-end justify-center px-4" style={{paddingBottom:"calc(1.5rem + var(--safe-bottom))",background:"rgba(0,0,0,0.55)"}}
           onMouseDown={e=>{if(e.target===e.currentTarget)setShowStatus(false);}}
           onTouchStart={e=>{if(e.target===e.currentTarget)setShowStatus(false);}}>
