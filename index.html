@@ -530,8 +530,10 @@ function App(){
   return(
     <div className="min-h-screen bg-gray-100">
       {showStatus&&(
-        <div className="fixed inset-0 z-50 flex items-end justify-center px-4" style={{paddingBottom:"calc(1.5rem + var(--safe-bottom))",background:"rgba(0,0,0,0.55)"}} onClick={()=>setShowStatus(false)}>
-          <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl slideUp overflow-hidden" onClick={e=>e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center px-4" style={{paddingBottom:"calc(1.5rem + var(--safe-bottom))",background:"rgba(0,0,0,0.55)"}}
+          onMouseDown={e=>{if(e.target===e.currentTarget)setShowStatus(false);}}
+          onTouchStart={e=>{if(e.target===e.currentTarget)setShowStatus(false);}}>
+          <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl slideUp overflow-hidden" onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()}>
             <div id="report-card" className="p-5 space-y-3" style={{background:"#F0F0F5"}}>
               <div className="bg-white rounded-2xl px-4 py-3">
                 <p className="font-black text-gray-900 text-base">{session?.quiosque}</p>
