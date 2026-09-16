@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover"/>
-  <title>Quiosque Combina v24</title>
+  <title>Quiosque Combina v26</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
@@ -35,7 +35,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useEffect,useCallback} = React;
+const {useState,useEffect,useCallback,useRef} = React;
 
 const SUPABASE_URL = "https://czujxgdqomczazlafcag.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN6dWp4Z2Rxb21jemF6bGFmY2FnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzODkwOTMsImV4cCI6MjEwNDk2NTA5M30.dux2EkfsMAg5z-v7yUeCNgg7eVHUF_ZROatJytzRgJc";
@@ -50,7 +50,7 @@ const TURNOS = [
 
 const {createClient} = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
-const SK="combina_sess_v22",CK="combina_cache_v22",QK="combina_queue_v22";
+const SK="combina_sess",CK="combina_cache",QK="combina_queue";
 const ls=k=>{try{return JSON.parse(localStorage.getItem(k)||"null")}catch{return null}};
 const lsa=k=>{try{return JSON.parse(localStorage.getItem(k)||"[]")}catch{return[]}};
 const lss=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
@@ -296,6 +296,7 @@ function App(){
   const [lead,setLead]=useState({active:false,nome:"",tel:"",obs:""});
   const [flash,setFlash]=useState(false);
   const [saving,setSaving]=useState(false);
+  const [queueCount,setQueueCount]=useState(()=>lsa(QK).length);
 
   const [histDate,setHistDate]=useState(todayISO());
   const [histFilter,setHistFilter]=useState("all");
@@ -316,37 +317,52 @@ function App(){
   const [fechoObs,setFechoObs]=useState("");
   const [guestMode,setGuestMode]=useState(false);
 
+  const syncingRef=useRef(false);
   const fetchData=useCallback(async()=>{
+    if(syncingRef.current)return;
+    syncingRef.current=true;
     try{
-      const{data,error}=await db.from("abordagens").select("*").order("ts",{ascending:false});
+      const{data,error}=await db.from("abordagens").select("*").order("ts",{ascending:false}).range(0,4999);
       if(error)throw error;
       const fromSupabase=(data||[]).map(fromRow);
-      // IDs já confirmados no Supabase — limpa-os da queue
       const supabaseIds=new Set(fromSupabase.map(x=>String(x.id)));
-      const q=lsa(QK);
-      const stillPending=q.filter(x=>!supabaseIds.has(String(x.id)));
-      lss(QK,stillPending);
-      // Merge: pendentes locais + Supabase
-      const queued=stillPending.map(fromRow);
-      const merged=[...queued,...fromSupabase].sort((a,b)=>b.ts.localeCompare(a.ts));
+      // Limpa da queue os que já estão confirmados
+      let pending=lsa(QK).filter(x=>!supabaseIds.has(String(x.id)));
+      lss(QK,pending);setQueueCount(pending.length);
+      // Merge pendentes + Supabase
+      const merged=[...pending.map(fromRow),...fromSupabase].sort((a,b)=>b.ts.localeCompare(a.ts));
       setRecs(merged);lss(CK,merged);setOnline(true);
-      // Flush oportunista dos pendentes
-      if(stillPending.length){
-        db.from("abordagens").insert(stillPending)
-          .then(({error:e})=>{
-            if(!e){lss(QK,[]);}
-            else{
-              // Remove os que já existem (duplicate key) — serão apanhados no próximo fetch
-              const remaining=stillPending.filter(x=>!supabaseIds.has(String(x.id)));
-              lss(QK,remaining);
-            }
-          });
+      // Flush 1-a-1 (duplicado = sucesso)
+      for(const row of pending){
+        const{error:e}=await db.from("abordagens").insert([row]);
+        if(!e||e.code==="23505"){
+          const q2=lsa(QK).filter(x=>String(x.id)!==String(row.id));
+          lss(QK,q2);setQueueCount(q2.length);
+        }
       }
     }catch{setOnline(false);}
-    finally{setLoading(false);}
+    finally{syncingRef.current=false;setLoading(false);}
   },[]);
 
-  useEffect(()=>{fetchData();const t=setInterval(fetchData,30000);return()=>clearInterval(t);},[fetchData]);
+  useEffect(()=>{
+    fetchData();
+    const t=setInterval(fetchData,30000);
+    const onVisible=()=>{if(document.visibilityState==="visible")fetchData();};
+    const onWake=()=>fetchData();
+    document.addEventListener("visibilitychange",onVisible);
+    window.addEventListener("online",onWake);
+    window.addEventListener("focus",onWake);
+    const ch=db.channel("abordagens-live")
+      .on("postgres_changes",{event:"*",schema:"public",table:"abordagens"},()=>fetchData())
+      .subscribe();
+    return()=>{
+      clearInterval(t);
+      document.removeEventListener("visibilitychange",onVisible);
+      window.removeEventListener("online",onWake);
+      window.removeEventListener("focus",onWake);
+      db.removeChannel(ch);
+    };
+  },[fetchData]);
 
   const reset=()=>{
     setStep(0);setAceitou(null);setTemContinente(null);setClienteNOS(null);setIC(null);
@@ -390,7 +406,7 @@ function App(){
     if(saving)return;
     setSaving(true);
     const r={
-      id:Date.now(),ts:localISO(),
+      id:Date.now()*1000+Math.floor(Math.random()*1000),ts:localISO(),
       colaborador:session.colaborador,quiosque:session.quiosque,
       horaEntrada:session.horaEntrada,horaSaida:session.horaSaida,
       aceitou,temContinente:aceitou?temContinente:null,clienteNOS:aceitou?clienteNOS:null,
@@ -412,9 +428,12 @@ function App(){
       setOnline(false);
       const q=lsa(QK);
       if(!q.find(x=>String(x.id)===String(r.id))){q.push(toRow(r));lss(QK,q);}
+      setQueueCount(lsa(QK).length);
     }
     finally{
       setSyncing(false);setSaving(false);
+      setQueueCount(lsa(QK).length);
+      setTimeout(fetchData,300);
       setFlash(true);setTimeout(()=>{setFlash(false);reset();},1600);
     }
   };
@@ -648,7 +667,10 @@ function App(){
               <div>
                 <div className="flex items-center gap-1.5">
                   <p className="font-bold text-gray-900 text-xs">{session.quiosque.replace("Quiosque ","")}</p>
-                  <div className={`w-1.5 h-1.5 rounded-full ${syncing?"bg-amber-400":online?"bg-emerald-500":"bg-red-400"}`}/>
+                  {queueCount>0
+                    ?<span className="text-[10px] font-black bg-amber-400 text-white rounded-full px-1.5 py-0.5 leading-none">{queueCount}⬆</span>
+                    :<div className={`w-1.5 h-1.5 rounded-full ${syncing?"bg-amber-400":online?"bg-emerald-500":"bg-red-400"}`}/>
+                  }
                 </div>
                 <p className="text-[10px] text-gray-400 font-medium">{session.colaborador} · {session.horaEntrada}–{session.horaSaida}</p>
               </div>
@@ -806,7 +828,7 @@ function App(){
               ))}
             </div>
             {(()=>{
-              const dayR=records.filter(r=>isoDay(r.ts)===histDate&&r.quiosque===session.quiosque);
+              const dayR=records.filter(r=>isoDay(r.ts)===histDate&&r.quiosque===session.quiosque&&r.colaborador===session.colaborador);
               const filtered=histFilter==="all"?dayR:histFilter==="lead"?dayR.filter(r=>r.lead):dayR.filter(r=>r.tipo===histFilter);
               const ds=stats(dayR);
               return(<>
