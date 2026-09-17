@@ -48,12 +48,19 @@ const TURNOS = [
   {id:"custom", label:"Personalizado",sub:"Definir horas",  entrada:"",     saida:""},
 ];
 
+const detectTurno=(d=new Date())=>{
+  const hm=d.getHours()*60+d.getMinutes();
+  const toMin=t=>{const[h,m]=t.split(":").map(Number);return h*60+m;};
+  return TURNOS.find(t=>t.id!=="custom"&&hm>=toMin(t.entrada)&&hm<toMin(t.saida))
+      ||TURNOS.find(t=>t.id==="full");
+};
+
 const {createClient} = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 const SK="combina_sess",CK="combina_cache",QK="combina_queue";
 const ls=k=>{try{return JSON.parse(localStorage.getItem(k)||"null")}catch{return null}};
 const lsa=k=>{try{return JSON.parse(localStorage.getItem(k)||"[]")}catch{return[]}};
-const lss=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+const lss=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true;}catch(e){console.error("localStorage indisponível",k,e);return false;}};
 
 const todayStr=()=>new Date().toDateString();
 const dayStartISO=()=>{const d=new Date();if(d.getHours()<1)d.setDate(d.getDate()-1);d.setHours(1,0,0,0);const p=n=>String(n).padStart(2,"0");return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T01:00:00.000`;};
@@ -121,6 +128,8 @@ const stats=arr=>({
   c3:arr.filter(r=>r.isCombina===3).length,
   comCC:arr.filter(r=>r.aceitou&&r.temContinente===true).length,
   semCC:arr.filter(r=>r.aceitou&&r.temContinente===false).length,
+  comNOS:arr.filter(r=>r.aceitou&&r.clienteNOS===true).length,
+  semNOS:arr.filter(r=>r.aceitou&&r.clienteNOS===false).length,
 });
 
 const exportXLS=(data,filename,shiftObs="")=>{
@@ -311,9 +320,13 @@ function App(){
   const [showStatus,setShowStatus]=useState(false);
   const [imgGenerating,setImgGenerating]=useState(false);
   const [imgCopied,setImgCopied]=useState(false);
+  const [dashImgGenerating,setDashImgGenerating]=useState(false);
+  const [dashImgCopied,setDashImgCopied]=useState(false);
   const [guestMode,setGuestMode]=useState(false);
 
   const syncingRef=useRef(false);
+  const idSaltRef=useRef(Math.floor(Math.random()*1000));
+  const nextId=()=>{idSaltRef.current=(idSaltRef.current+1)%1000;return Date.now()*1000+idSaltRef.current;};
   const fetchData=useCallback(async()=>{
     if(syncingRef.current)return;
     syncingRef.current=true;
@@ -367,7 +380,8 @@ function App(){
   };
   const doLogin=()=>{
     setShowStatus(false);
-    const s={colaborador:lUser.trim(),quiosque:lQ,horaEntrada:"",horaSaida:"",loginTs:localISO()};
+    const turno=detectTurno();
+    const s={colaborador:lUser.trim(),quiosque:lQ,horaEntrada:turno.entrada,horaSaida:turno.saida,loginTs:localISO()};
     setSession(s);lss(SK,s);
   };
   const doLogout=()=>{localStorage.removeItem(SK);setSession(null);setShowStatus(false);setImgCopied(false);setGuestMode(false);reset();};
@@ -395,7 +409,7 @@ function App(){
     if(saving)return;
     setSaving(true);
     const r={
-      id:Date.now()*1000+Math.floor(Math.random()*1000),ts:localISO(),
+      id:nextId(),ts:localISO(),
       colaborador:session.colaborador,quiosque:session.quiosque,
       horaEntrada:session.horaEntrada,horaSaida:session.horaSaida,
       aceitou,temContinente:aceitou?temContinente:null,clienteNOS:aceitou?clienteNOS:null,
@@ -466,6 +480,23 @@ function App(){
       else{const url=canvas.toDataURL("image/png");const a=document.createElement("a");a.href=url;a.download=`Relatorio_${session?.colaborador||"turno"}_${dtag}.png`;document.body.appendChild(a);a.click();document.body.removeChild(a);}
     }catch(e){console.error(e);}
     finally{setImgGenerating(false);}
+  };
+
+  const generateDashImage=async()=>{
+    setDashImgGenerating(true);
+    const el=document.getElementById("dash-report-card");
+    if(!el){setDashImgGenerating(false);return;}
+    try{
+      const canvas=await html2canvas(el,{scale:2,backgroundColor:"#f3f4f6",useCORS:true,logging:false});
+      let copied=false;
+      if(navigator.clipboard&&window.ClipboardItem){
+        try{await new Promise((res,rej)=>canvas.toBlob(b=>{if(!b)return rej();navigator.clipboard.write([new ClipboardItem({"image/png":b})]).then(res).catch(rej);},"image/png"));copied=true;}
+        catch(e){console.warn("clipboard",e);}
+      }
+      if(copied){setDashImgCopied(true);setTimeout(()=>setDashImgCopied(false),2800);}
+      else{const url=canvas.toDataURL("image/png");const a=document.createElement("a");a.href=url;a.download=`Dashboard_${dtag}.png`;document.body.appendChild(a);a.click();document.body.removeChild(a);}
+    }catch(e){console.error(e);}
+    finally{setDashImgGenerating(false);}
   };
 
   if(loading)return(
@@ -539,11 +570,13 @@ function App(){
               <div className="bg-white rounded-2xl px-4 py-3">
                 <p className="font-black text-gray-900 text-base">{session?.quiosque}</p>
                 <p className="text-xs text-gray-400 font-medium">{new Date().toLocaleDateString("pt-PT",{weekday:"long",day:"2-digit",month:"long"})}</p>
+                <p className="text-[10px] text-gray-400 font-semibold mt-1">{myS.total} abordagens</p>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="bg-white rounded-2xl p-3 text-center"><p className="text-2xl font-black text-gray-900">{myS.total}</p><p className="text-[10px] text-gray-400 font-bold mt-0.5">Abord.</p></div>
-                <div className="rounded-2xl p-3 text-center" style={{background:"#f0fdf4"}}><p className="text-2xl font-black text-gray-900">{myTotV}</p><p className="text-[10px] font-bold mt-0.5" style={{color:"#16a34a"}}>Vendas</p></div>
-                <div className="rounded-2xl p-3 text-center" style={{background:"#eff6ff"}}><p className="text-2xl font-black text-gray-900">{myS.leads}</p><p className="text-[10px] font-bold mt-0.5" style={{color:"#2563eb"}}>Leads</p></div>
+              <div className="grid grid-cols-4 gap-1.5">
+                <div className="bg-white rounded-2xl py-3 px-1 text-center"><p className="text-xl font-black text-gray-900">{myS.conversas}</p><p className="text-[9px] text-gray-400 font-bold mt-0.5">Conversas</p></div>
+                <div className="rounded-2xl py-3 px-1 text-center" style={{background:"#fef2f2"}}><p className="text-xl font-black text-gray-900">{myS.recusas}</p><p className="text-[9px] font-bold mt-0.5" style={{color:"#dc2626"}}>Recusas</p></div>
+                <div className="rounded-2xl py-3 px-1 text-center" style={{background:"#f0fdf4"}}><p className="text-xl font-black text-gray-900">{myTotV}</p><p className="text-[9px] font-bold mt-0.5" style={{color:"#16a34a"}}>Vendas</p></div>
+                <div className="rounded-2xl py-3 px-1 text-center" style={{background:"#eff6ff"}}><p className="text-xl font-black text-gray-900">{myS.leads}</p><p className="text-[9px] font-bold mt-0.5" style={{color:"#2563eb"}}>Leads</p></div>
               </div>
               <div className="bg-white rounded-2xl px-4 py-3 space-y-1.5">
                 <StatRow label="Combina" value={myS.combina}/>
@@ -588,7 +621,6 @@ function App(){
                     :<div className={`w-1.5 h-1.5 rounded-full ${syncing?"bg-amber-400":online?"bg-emerald-500":"bg-red-400"}`}/>
                   }
                 </div>
-                
               </div>
             ):(
               <div>
@@ -851,10 +883,23 @@ function App(){
                 .sort((a,b)=>(b.s.vendas+b.s.leads)-(a.s.vendas+a.s.leads));
               const days=[...new Set(records.map(r=>isoDay(r.ts)))].sort().reverse().slice(0,15);
               const dayStats=days.map(d=>({d,s:stats(records.filter(r=>isoDay(r.ts)===d))}));
-              return(<div className="space-y-3">
+              return(<div className="space-y-3" id="dash-report-card">
                 <div className="flex items-center justify-between">
                   <p className="font-black text-gray-900">Dashboard</p>
-                  <button onClick={()=>setUnlocked(false)} className="text-xs text-gray-400 font-semibold">Bloquear</button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={generateDashImage} disabled={dashImgGenerating}
+                      title="Copiar imagem para WhatsApp"
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center active:scale-95 transition-all
+                        ${dashImgGenerating?"bg-gray-200 text-gray-400 cursor-wait":dashImgCopied?"bg-emerald-600 text-white":"bg-gray-900 text-white"}`}>
+                      {dashImgGenerating
+                        ?<div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full spin"/>
+                        :dashImgCopied
+                        ?<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                        :<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                      }
+                    </button>
+                    <button onClick={()=>setUnlocked(false)} className="text-xs text-gray-400 font-semibold">Bloquear</button>
+                  </div>
                 </div>
                 <Card className="p-4">
                   <div className="flex items-center justify-between mb-3">
@@ -902,6 +947,8 @@ function App(){
                     <SLabel>Perfil do cliente</SLabel>
                     <StatRow label="Com Cartão Continente" value={as.comCC}/>
                     <StatRow label="Sem Cartão Continente" value={as.semCC}/>
+                    <StatRow label="Cliente NOS" value={as.comNOS}/>
+                    <StatRow label="Não Cliente NOS" value={as.semNOS}/>
                   </Card>
                   <div className="grid grid-cols-2 gap-3">
                     <KPILeads total={as.leads}/>
