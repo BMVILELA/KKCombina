@@ -91,6 +91,7 @@ const toRow=r=>({
   hora_entrada:r.horaEntrada||"",hora_saida:r.horaSaida||"",aceitou:!!r.aceitou,
   tem_continente:r.temContinente==null?null:!!r.temContinente,
   cliente_nos:r.clienteNOS==null?null:!!r.clienteNOS,
+  cliente_galp:r.clienteGalp==null?null:!!r.clienteGalp,
   is_combina:r.isCombina==null?null:Number(r.isCombina),
   vendeu_combina:!!(r.vendas?.combina),venda_energia:!!(r.vendas?.energia),
   venda_novo_cliente:!!(r.vendas?.novoCliente),venda_alarme:!!(r.vendas?.alarme),
@@ -103,7 +104,7 @@ const fromRow=row=>{
   return{
     id:row.id,ts:row.ts,colaborador:row.colaborador,quiosque:row.quiosque,
     horaEntrada:row.hora_entrada,horaSaida:row.hora_saida,aceitou:row.aceitou,
-    temContinente:row.tem_continente,clienteNOS:row.cliente_nos,isCombina:row.is_combina,
+    temContinente:row.tem_continente,clienteNOS:row.cliente_nos,clienteGalp:row.cliente_galp,isCombina:row.is_combina,
     vendas:{combina:row.vendeu_combina,energia:row.venda_energia,novoCliente:row.venda_novo_cliente,
             alarme:row.venda_alarme,outros:row.venda_outros,outrosDesc:row.venda_outros_desc},
     lead:row.tem_lead?{nome:row.lead_nome,tel:row.lead_tel,obs:row.lead_obs}:null,
@@ -130,6 +131,8 @@ const stats=arr=>({
   semCC:arr.filter(r=>r.aceitou&&r.temContinente===false).length,
   comNOS:arr.filter(r=>r.aceitou&&r.clienteNOS===true).length,
   semNOS:arr.filter(r=>r.aceitou&&r.clienteNOS===false).length,
+  comGalp:arr.filter(r=>r.aceitou&&r.clienteGalp===true).length,
+  semGalp:arr.filter(r=>r.aceitou&&r.clienteGalp===false).length,
 });
 
 const exportXLS=(data,filename,shiftObs="")=>{
@@ -139,6 +142,7 @@ const exportXLS=(data,filename,shiftObs="")=>{
     "Entrada":r.horaEntrada||"","Saída":r.horaSaida||"","Aceitou":r.aceitou?"Sim":"Não",
     "Tem Cartão Continente":r.temContinente==null?"":r.temContinente?"Sim":"Não",
     "É cliente NOS":r.clienteNOS==null?"":r.clienteNOS?"Sim":"Não",
+    "É cliente Galp":r.clienteGalp==null?"":r.clienteGalp?"Sim":"Não",
     "Perfil Combina":r.isCombina==null?"":r.isCombina===0?"Sem Combina":`Combina ${r.isCombina}`,
     "Venda Combina":r.vendas?.combina?"Sim":"Não","Venda Energia":r.vendas?.energia?"Sim":"Não",
     "Venda Novo NOS":r.vendas?.novoCliente?"Sim":"Não","Venda Alarme":r.vendas?.alarme?"Sim":"Não",
@@ -299,6 +303,7 @@ function App(){
   const [aceitou,setAceitou]=useState(null);
   const [temContinente,setTemContinente]=useState(null);
   const [clienteNOS,setClienteNOS]=useState(null);
+  const [clienteGalp,setClienteGalp]=useState(null);
   const [isCombina,setIC]=useState(null);
   const [vendas,setVendas]=useState({combina:false,energia:false,novoCliente:false,alarme:false,outros:false,outrosDesc:""});
   const [lead,setLead]=useState({active:false,nome:"",tel:"",obs:""});
@@ -374,7 +379,7 @@ function App(){
   },[fetchData]);
 
   const reset=()=>{
-    setStep(0);setAceitou(null);setTemContinente(null);setClienteNOS(null);setIC(null);
+    setStep(0);setAceitou(null);setTemContinente(null);setClienteNOS(null);setClienteGalp(null);setIC(null);
     setVendas({combina:false,energia:false,novoCliente:false,alarme:false,outros:false,outrosDesc:""});
     setLead({active:false,nome:"",tel:"",obs:""});
   };
@@ -393,7 +398,7 @@ function App(){
   const canNext=(()=>{
     if(sn==="aceitou") return aceitou!==null;
     if(sn==="perfil"){
-      if(temContinente===null||clienteNOS===null) return false;
+      if(temContinente===null||clienteNOS===null||clienteGalp===null) return false;
       if(temContinente===true&&isCombina===null)  return false;
       return true;
     }
@@ -412,7 +417,7 @@ function App(){
       id:nextId(),ts:localISO(),
       colaborador:session.colaborador,quiosque:session.quiosque,
       horaEntrada:session.horaEntrada,horaSaida:session.horaSaida,
-      aceitou,temContinente:aceitou?temContinente:null,clienteNOS:aceitou?clienteNOS:null,
+      aceitou,temContinente:aceitou?temContinente:null,clienteNOS:aceitou?clienteNOS:null,clienteGalp:aceitou?clienteGalp:null,
       isCombina:aceitou&&temContinente?isCombina:null,
       vendas:aceitou?vendas:null,
       lead:lead.active?{nome:lead.nome||"—",tel:lead.tel,obs:lead.obs}:null,
@@ -688,6 +693,17 @@ function App(){
                         ${clienteNOS===false?"border-red-400 bg-red-50 text-red-600":"border-gray-100 bg-gray-50 text-gray-500"}`}>Não</button>
                   </div>
                 </div>
+                <div>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">É cliente Galp?</p>
+                  <div className="flex gap-2">
+                    <button onClick={()=>setClienteGalp(true)}
+                      className={`flex-1 py-3.5 rounded-2xl border-2 font-bold text-sm transition-all active:scale-[.97]
+                        ${clienteGalp===true?"border-emerald-500 bg-emerald-50 text-emerald-700":"border-gray-100 bg-gray-50 text-gray-500"}`}>Sim</button>
+                    <button onClick={()=>setClienteGalp(false)}
+                      className={`flex-1 py-3.5 rounded-2xl border-2 font-bold text-sm transition-all active:scale-[.97]
+                        ${clienteGalp===false?"border-red-400 bg-red-50 text-red-600":"border-gray-100 bg-gray-50 text-gray-500"}`}>Não</button>
+                  </div>
+                </div>
                 {temContinente===true&&(
                   <div className="pop">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Perfil Combina</p>
@@ -806,6 +822,7 @@ function App(){
                               {r.temContinente===false&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-600">Sem CC</span>}
                               {combinaLabel&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">{combinaLabel}</span>}
                               {r.clienteNOS===false&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-100 text-orange-600">Não NOS</span>}
+                              {r.clienteGalp===false&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-600">Não Galp</span>}
                               {r.vendas?.combina&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700">Combina</span>}
                               {r.vendas?.energia&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-100 text-orange-700">Energia</span>}
                               {r.vendas?.novoCliente&&<span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">Novo NOS</span>}
@@ -949,6 +966,8 @@ function App(){
                     <StatRow label="Sem Cartão Continente" value={as.semCC}/>
                     <StatRow label="Cliente NOS" value={as.comNOS}/>
                     <StatRow label="Não Cliente NOS" value={as.semNOS}/>
+                    <StatRow label="Cliente Galp" value={as.comGalp}/>
+                    <StatRow label="Não Cliente Galp" value={as.semGalp}/>
                   </Card>
                   <div className="grid grid-cols-2 gap-3">
                     <KPILeads total={as.leads}/>
