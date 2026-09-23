@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover"/>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+  <meta http-equiv="Pragma" content="no-cache"/>
+  <meta http-equiv="Expires" content="0"/>
   <title>Quiosque Combina v33</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -61,6 +64,7 @@ const SK="combina_sess",CK="combina_cache",QK="combina_queue";
 const ls=k=>{try{return JSON.parse(localStorage.getItem(k)||"null")}catch{return null}};
 const lsa=k=>{try{return JSON.parse(localStorage.getItem(k)||"[]")}catch{return[]}};
 const lss=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true;}catch(e){console.error("localStorage indisponível",k,e);return false;}};
+const lsr=k=>{try{localStorage.removeItem(k);}catch(e){console.error("localStorage indisponível ao remover",k,e);}};
 
 const todayStr=()=>new Date().toDateString();
 const dayStartISO=()=>{const d=new Date();if(d.getHours()<1)d.setDate(d.getDate()-1);d.setHours(1,0,0,0);const p=n=>String(n).padStart(2,"0");return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T01:00:00.000`;};
@@ -389,7 +393,7 @@ function App(){
     const s={colaborador:lUser.trim(),quiosque:lQ,horaEntrada:turno.entrada,horaSaida:turno.saida,loginTs:localISO()};
     setSession(s);lss(SK,s);
   };
-  const doLogout=()=>{localStorage.removeItem(SK);setSession(null);setShowStatus(false);setImgCopied(false);setGuestMode(false);reset();};
+  const doLogout=()=>{lsr(SK);setSession(null);setShowStatus(false);setImgCopied(false);setGuestMode(false);reset();};
 
   const steps=aceitou===false?["aceitou"]:["aceitou","perfil","vendas"];
   const sn=steps[step];
