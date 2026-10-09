@@ -340,7 +340,7 @@ function App(){
     if(syncingRef.current)return;
     syncingRef.current=true;
     try{
-      const{data,error}=await db.from("abordagens").select("*").order("ts",{ascending:false}).range(0,4999);
+      const{data,error}=await db.from("abordagens").select("*").order("ts",{ascending:false}).range(0,9999);
       if(error)throw error;
       const fromSupabase=(data||[]).map(fromRow);
       const supabaseIds=new Set(fromSupabase.map(x=>String(x.id)));
